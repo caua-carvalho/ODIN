@@ -1,0 +1,129 @@
+# ==========================================
+# ODIN - React + Vite + Python
+# ==========================================
+
+# ------------------------------------------
+# Environment / Secrets
+# ------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.template
+
+# ------------------------------------------
+# Node.js / React / Vite
+# ------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# Vite
+dist/
+.vite/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# ------------------------------------------
+# Python
+# ------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ------------------------------------------
+# Logs
+# ------------------------------------------
+*.log
+logs/
+
+# ------------------------------------------
+# Local databases / runtime data
+# ------------------------------------------
+*.sqlite
+*.sqlite3
+*.db
+
+# ------------------------------------------
+# IDEs / Editors
+# ------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ------------------------------------------
+# OS
+# ------------------------------------------
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ------------------------------------------
+# Temporary files
+# ------------------------------------------
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+
+# ------------------------------------------
+# Build / generated files
+# ------------------------------------------
+*.map
+
+# ------------------------------------------
+# Local AI / model files
+# ------------------------------------------
+# Descomente caso o Odin passe a baixar modelos localmente
+# models/
+# *.gguf
+# *.safetensors
+# *.bin
+
+# ------------------------------------------
+# Local workspace
+# ------------------------------------------
+# Caso o workspace do Odin fique dentro do repositório,
+# NÃO versione o conteúdo dele.
+# workspace/
+
+# ------------------------------------------
+# OS-specific Python tools
+# ------------------------------------------
+.pytype/
+dmypy.json
+dmypy.json
