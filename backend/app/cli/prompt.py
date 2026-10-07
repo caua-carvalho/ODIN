@@ -19,6 +19,29 @@ ODIN_GRAY = "#737373"
 ODIN_WHITE = "#F5F5F5"
 
 
+# Accepted answers for permission prompts. Anything else is invalid
+# and must re-prompt - never default to approval.
+APPROVAL_YES = {"y", "yes"}
+APPROVAL_NO = {"n", "no"}
+
+
+def parse_approval_answer(raw: str) -> bool | None:
+    """Parse a user's permission answer.
+
+    Returns True for approval, False for denial and None when the
+    input is invalid/ambiguous (which must trigger a new prompt).
+    """
+    answer = raw.strip().lower()
+
+    if answer in APPROVAL_YES:
+        return True
+
+    if answer in APPROVAL_NO:
+        return False
+
+    return None
+
+
 COMMANDS = {
     "/help": "Show available commands",
     "/clear": "Clear the terminal",
@@ -105,3 +128,30 @@ class OdinPrompt:
                 ("class:prompt", "❯ "),
             ],
         )
+
+    async def ask_approval(self) -> bool:
+        """Ask the user to approve or deny a pending operation.
+
+        Security rules:
+        - only explicit answers approve (y/yes, case-insensitive);
+        - invalid input re-prompts, never falls through to approval;
+        - EOF/interrupt denies the request (never approves).
+        """
+        while True:
+            try:
+                raw = await self.session.prompt_async(
+                    [
+                        ("class:prompt", "Permission [y/n]: "),
+                    ],
+                )
+            except (EOFError, KeyboardInterrupt):
+                # Interruption while deciding: deny, never approve.
+                print()
+                return False
+
+            answer = parse_approval_answer(raw)
+
+            if answer is not None:
+                return answer
+
+            print("Please enter Y or N:")
