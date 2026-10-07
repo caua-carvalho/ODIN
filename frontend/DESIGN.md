@@ -1,140 +1,131 @@
-web application/stitch/projects/15391610934161767904/screens/ebfb06d5449340ee9fb07ce77849fecd
-# Documento de Requisitos de Produto (PRD) & Design Brief
-**Projeto:** ODIN — Personal AI Operating Assistant & Local Console  
-**Versão:** 1.0.0 (MVP)  
-**Status:** Aprovado para Desenvolvimento Frontend  
-**Autor:** Design & Product Architecture  
+# Product Requirements Document (PRD) & Design Specification
+## Project: ODIN (Operational Digital Intelligence Node)
+**Version:** 1.0.0  
+**Status:** Approved / Design Complete  
+**Target Release:** v0.1.0 (Core Runtime)  
+**Authors:** Product Engineering & Design Architecture  
 
 ---
 
-## 1. Visão Geral do Produto
+## 1. Executive Summary & Vision
 
-### 1.1 Declaração de Missão
-O **ODIN** é um assistente operacional de inteligência artificial local concebido para atuar como o cérebro supervisor de tarefas de engenharia de software, automação de ambiente, governança de ferramentas e inspeção de código em máquina local. Inspirado filosoficamente no conceito de computação assistiva omnipresente (como o JARVIS), o ODIN substitui a interface tradicional de "chat de perguntas e respostas" por um **console operacional unificado**, onde execução de ferramentas, monitoramento de recursos de hardware e governança de permissões ocorrem em um mesmo plano de comando.
+### 1.1 Product Identity
+- **Product Name:** ODIN
+- **Full Nomenclature:** Operational Digital Intelligence Node
+- **Tagline:** *KNOW. REMEMBER. ACT.*
+- **Classification:** Personal Operational AI Assistant / Local-First AI Operating System
 
-### 1.2 Objetivos do MVP
-- **Interface Tática e Funcional:** Proporcionar uma visão em tempo real do estado do agente supervisor, da telemetria da máquina e da timeline de atividades.
-- **Transparência de Execução de Ferramentas:** Renderizar chamadas de sub-processos (ex.: `read_file`, `analyze_ast`, scripts bash, MCPs) com clareza técnica imediata (status de saída, tempo de execução, diff de código).
-- **Segurança Zero-Trust Local:** Permitir que o operador humano audite e autorize ações críticas de modificação no disco (`write_file`, comandos destrutivos) com um único clique ou rejeição explícita.
-- **Separação Rígida Frontend-Backend:** Desenvolver um frontend moderno, decoupled e orientado a contratos de API REST/WebSockets, viabilizando integração rápida com daemons locais desenvolvidos em Python, Go, Rust ou Node.js.
+### 1.2 Core Value Proposition
+ODIN is a local, high-autonomy operational AI assistant engineered for developers, system architects, and technical operators. Unlike generic chat-based conversational wrappers or SaaS productivity dashboards, ODIN functions as an intelligent execution environment with hardware-level transparency, strict sandbox enforcement, deterministic tool invocation, and cryptographic human-in-the-loop security sign-offs.
 
----
-
-## 2. Personas e Casos de Uso
-
-### 2.1 Persona Principal: Engenheiro de Software / Power User Local ("Cauã")
-- **Contexto:** Desenvolve em múltiplas linguagens (TypeScript/Next.js, Python), utiliza modelos locais (Ollama, vLLM) e APIs remotas de alta capacidade (Claude 3.7 Sonnet).
-- **Necessidades:**
-  - Diagnosticar bugs complexos analisando árvores de arquivos locais sem precisar sair do fluxo.
-  - Saber exatamente quais arquivos o agente está lendo ou modificando.
-  - Manter controle de uso de hardware (CPU, VRAM da GPU, temperatura e memória).
-  - Executar comandos com atalhos de teclado rápidos (HUD/Terminal pattern).
-
-### 2.2 Principais Casos de Uso
-1. **Diagnóstico & Reparo Autônomo de Código:** O operador aponta um repositório (`/home/caua/FnCash`) e um problema; o Odin lê a árvore de arquivos, identifica a falha e sugere/aplica patches com revisão de diff.
-2. **Auditoria de Permissões Críticas:** Ações que modificam o filesystem fora da sandbox disparam alertas que exigem autorização explícita do operador antes da execução.
-3. **Telemetria e Inspeção de Saúde:** Monitoramento em background do heartbeat do agente supervisor, latência de inferência e capacidade de tokens da janela de contexto.
+### 1.3 Design Philosophy: The Nordic-Apple Synthesis
+The user experience bridges Scandinavian industrial design, Apple human interface standards (macOS / visionOS), and tactical AI telemetry:
+- **70% Minimal & Premium:** Continuous dark surfaces, generous negative space, subtle surface contrast, and soft elevation (`12px`–`20px` corner radii).
+- **20% Nordic Industrial Restraint:** Architectural grids, balanced geometry, symmetry, unornamented functional components, and strict purpose.
+- **10% Tactical Futurism:** Subdued optical signals, dark obsidian backgrounds, monospace instrumentation data, and the central ODIN Core focal point.
+- **Clarity Over Clutter:** Absolute elimination of sci-fi neon HUDs, arbitrary orbital coordinates, fake worker pool metrics, or dense, illegible card clusters.
 
 ---
 
-## 3. Arquitetura de Informação & Mapa de Navegação
+## 2. Product Architecture & Scope Boundaries
 
-A navegação persistente do sistema é ancorada em uma barra lateral fixa (desktop) e cabeçalho de status em tempo real:
+### 2.1 Explicit Functional Concepts (In-Scope)
+ODIN’s visual interface is strictly mapped to actual backend primitives:
+1. **System & Agent Telemetry:** Real-time state of the host runtime, connected node (`node_01.local`), upstream model (`Gemini 2.5 Flash`), active tool count, latency, and uptime.
+2. **AI Terminal & Chat:** Command console and operational session execution featuring user prompts, chain-of-thought dispatches, and tool payload streams.
+3. **Tool Registry & Subroutines:** Managed catalog of sandbox dispatchers across `FILESYSTEM` (`read_file`, `write_file`, `list_directory`, `search_files`, `delete_file`, `move_file`, `create_directory`) and `SHELL` (`execute_command`).
+4. **Interactive Security Interceptions:** Inline and dedicated human-in-the-loop permission gates displaying tool name, target specifier, risk level, interception reason, and line-level changeset diffs.
+5. **Hardware Instrumentation:** Host hardware metrics (CPU utilization %, Memory consumption, Disk volume capacity, load average, uptime).
+6. **Immutable Audit Ledger:** Chronological record of executed actions, approval states, and Blake3/cryptographic verification status.
 
-```
-[ODIN v0.9.4 Kernel] ────────────────────────── [Status: Online | 18:42:32 UTC]
-│
-├── /dashboard       -> Painel do Sistema (Visão Geral, Recursos, Timeline)
-├── /chat            -> Console Conversacional Tático & Execução de Tools
-├── /tools           -> Catálogo de Ferramentas Registradas e RPCs Ativos
-├── /skills          -> Módulos Especialistas de Conhecimento Habilitados
-├── /mcp             -> Conexões e Servidores Model Context Protocol
-├── /permissions     -> Fila de Autorizações e Políticas de Segurança Local
-└── /settings        -> Configurações de Modelos, Chaves de API e Workspaces
-```
-
----
-
-## 4. Especificação Funcional das Telas Principais
-
-### 4.1 Dashboard Operacional (`/dashboard`)
-* **Header de Contexto:** Identificador do nó ativo (`NODE_01`), status do supervisor autônomo, seletor de workspace (`/home/caua/odin-workspace`) e botão de interrupção geral (*Kill-switch*).
-* **Card de Alerta de Permissão Crítica:**
-  - Destaque em âmbar para ações pendentes de autorização.
-  - Exibição de comando, path afetado, delta de linhas e botões diretos: `Autorizar Ambas`, `Permitir`, `Recusar`.
-* **Grid de Status de Agente & Inferência (6 Módulos):**
-  1. *Núcleo Autônomo:* Status do ciclo de heartbeat (100ms ± 2ms).
-  2. *Motor de Inferência:* Modelo principal (Claude 3.7 Sonnet) com fallback configurado (Ollama local / qwen2.5:14b) e janela de contexto utilizada (12.4k / 200k).
-  3. *Estado Operacional:* Status das threads de trabalho alocadas em pool.
-  4. *Espaço Raiz:* Contagem de artefatos rastreados no Git e política de isolamento.
-  5. *Toolchain:* Total de ferramentas RPC ativas (`fs.*`, `bash`, `git`, `code_search`, `lsp`).
-  6. *Governança Zero-Trust:* Total de ações validadas na sessão e módulos de guarda ativos.
-* **Telemetria de Hardware & Host (Monitor Lateral/Inferior):**
-  - Gráficos sparkline para uso de CPU (AMD Ryzen 9 7950X, temperatura e frequência de clock).
-  - Medidor de memória RAM & VRAM (NVIDIA RTX 4090 alocada).
-  - Armazenamento NVMe e taxa de I/O em tempo real.
-* **Linha do Tempo de Atividades Recentes:**
-  - Stream de logs em tempo real categorizados por tipo (`TOOL_EXEC`, `THREAD_SYNC`, `PERMISSAO`, `HABILIDADE`, `DAEMON`, `AUDITORIA`).
-  - Identificação de timestamp preciso e links para histórico completo.
-
-### 4.2 Console de Chat Operacional (`/chat`)
-* **Barra de Metadados da Sessão:** Thread ativa (`#049`), título da tarefa de diagnóstico, botões `+ Nova Conversa` e `Exportar Logs`.
-* **Métricas da Thread:** Indicadores rápidos de arquivos indexados no contexto, latência de inferência do motor, velocidade de geração de tokens (tok/s) e modo de proteção do filesystem (`Read / Guarded`).
-* **Área de Diálogo & Mensagens:**
-  - *Mensagem do Operador:* Alinhada à direita, cartão discreto em tom carvão sem ruído gráfico.
-  - *Mensagem do Odin:* Alinhada à esquerda, com metadados de inferência e tokens gastos.
-  - *Card de Execução de Ferramentas:* Bloco especializado exibindo ferramenta acionada (`read_file`, `analyze_ast`), tempo de execução, caminho do arquivo e snippet de código com marcação e destaque semântico.
-  - *Ações do Agente:* Botões contextuais de aprovação de execução (`Aplicar patch via write_file`, `Ver diff`, `Executar testes`).
-* **Input de Comando (Terminal HUD / Floating Capsule):**
-  - Campo de entrada com atalhos de autocompletar (`/inspect`, `/run-tests`, `/clear`).
-  - Contagem de contexto consumido em tempo real.
-  - Indicador de modelo ativo e botão de disparo com tecla de atalho (`Shift + Enter` para nova linha, `Enter` para envio).
+### 2.2 Prohibited Anti-Patterns (Out-of-Scope)
+To preserve engineering integrity and prevent cognitive overload, ODIN explicitly avoids fabricating:
+- Fictional worker fleets or multi-agent swarm orchestration graphs.
+- Artificial token usage burn gauges or fake inference benchmarking charts.
+- Hallucinated network traffic packet analyzers.
+- Generic SaaS marketing widgets, social avatars, or bubbly consumer messaging elements.
 
 ---
 
-## 5. Diretrizes de Design & Identidade Visual
+## 3. Design System & Token Specification
 
-O ODIN suporta duas linhagens estéticas refinadas criadas no projeto:
-1. **Linhagem A — Tactical HUD Operating System:** Linhas técnicas precisas, divisores finos, acentos em laranja âmbar tático (`#FF7A00`), tipografia monoespaçada visível e estilo de console de inteligência militar.
-2. **Linhagem B — Obsidian Serenity (Minimal Orgânico):** Cantos arredondados contínuos (`rounded-2xl` e pílulas), curvas suaves, fundo obsidian escuro profundo (`#131316`), acentos aveludados e sensação de calm tech sofisticada.
+ODIN is governed by two codified design systems (`{{DATA:DESIGN_SYSTEM:DESIGN_SYSTEM_1}}` & `{{DATA:DESIGN_SYSTEM:DESIGN_SYSTEM_2}}`). The active specification follows the refined **Tactical Minimalist OS** paradigm:
 
-### 5.1 Tokens de Cor Fundamentais
-* **Backgrounds Primários:** `#050505`, `#0A0A0A`, `#0E0E11`
-* **Superfícies & Cartões:** `#131316`, `#1B1B1E`, `#222226`
-* **Acento Primário (Identidade Odin):** `#FF7A00` / `#FF8A3D` (Laranja Âmbar — reservado para status ativos, ações principais, cursores e indicadores luminosos)
-* **Texto Primário:** `#F5F5F5` (Alto contraste e legibilidade)
-* **Texto Secundário / Labels:** `#8E8E93` e `#52525B`
-* **Bordas Estruturais:** `rgba(255, 255, 255, 0.08)` a `rgba(255, 255, 255, 0.12)`
+### 3.1 Color Palette
+| Token Name | Hex Value | Purpose / Usage |
+| :--- | :--- | :--- |
+| `surface-canvas` | `#050505` | Deep primary canvas background |
+| `surface-base` | `#0B0B0D` | Primary window/shell surface |
+| `surface-container` | `#111113` | Elevated inspection panes & panels |
+| `surface-elevated` | `#171719` | Interactive cards, input fields, and hover states |
+| `text-primary` | `#F5F5F7` | Primary headings, titles, active labels |
+| `text-secondary` | `#A1A1A6` | Descriptions, secondary telemetry, body text |
+| `text-muted` | `#6E6E73` | Metadata, timestamps, parameter tags |
+| `accent-primary` | `#FF7A00` | **ODIN Primary Orange**: Approval actions, core glyph, active indicators |
+| `accent-secondary`| `#FF9A3D` | Warning signals, medium-risk tags |
+| `accent-subtle` | `#00D9FF` | Cyan technical status (used sparingly for active connections) |
+| `border-subtle` | `rgba(255,255,255,0.06)` | Clean 1px architectural surface separation |
 
-### 5.2 Tipografia
-* **Interface Geral:** Inter / Geist Sans (11px a 18px, pesos Regular e Medium).
-* **Dados Técnicos, Código e Logs:** JetBrains Mono / Fira Code (11px a 13px com tracking reduzido).
+### 3.2 Typography Hierarchy
+- **Primary Interface Font:** `Inter` / `Geist` (Human-readable UI, navigation, headers, modal disclosures).
+- **Technical Telemetry Font:** `JetBrains Mono` (Terminal inputs, code diffs, parameter schemas, file paths, Blake3 hashes, timestamps).
 
----
-
-## 6. Contrato de Integração do Frontend (API Mocking & Real-Time)
-
-Para conectar o frontend ao backend local, as seguintes interfaces de dados e eventos foram preparadas:
-
-### 6.1 Endpoints REST Esperados
-- `GET /api/v1/system/status` — Retorna uso de CPU, RAM, VRAM, disco, temperatura e uptime.
-- `GET /api/v1/agent/state` — Retorna heartbeat, modelo ativo, fallback e permissões pendentes.
-- `GET /api/v1/activity/timeline` — Lista os últimos eventos de execução do agente.
-- `POST /api/v1/permissions/authorize` — Payload `{ actionId: string, decision: 'allow' | 'deny' }`.
-- `POST /api/v1/chat/threads` — Inicia nova thread de execução.
-
-### 6.2 Canais WebSocket / SSE
-- `ws://127.0.0.1:8080/events`
-  - Evento `tool_call_start`: Dispara o skeleton card no chat.
-  - Evento `tool_call_completed`: Atualiza o snippet com resultado e status.
-  - Evento `token_stream`: Renderiza texto em tempo real sem travamentos de DOM.
-  - Evento `hardware_tick`: Atualiza sparklines a cada 1 segundo.
+### 3.3 Geometry & Elevation
+- **Corner Radii:** `8px` (micro badges), `12px`–`14px` (cards, inputs, list items), `18px`–`20px` (major surface containers).
+- **Borders & Shadows:** `1px solid rgba(255, 255, 255, 0.06)` paired with soft ambient diffusion (`box-shadow: 0 8px 32px rgba(0,0,0,0.4)`).
 
 ---
 
-## 7. Roadmap de Versões Futuras
+## 4. Information Architecture & Screen Specifications
 
-* **Fase 1 (Atual - MVP Frontend):** Estrutura completa de Dashboard e Chat Console com variações tática HUD e orgânica minimalista.
-* **Fase 2 (Conectividade Local):** Integração com daemon local em WebSocket/gRPC e mock de servidor Ollama/Claude.
-* **Fase 3 (Telas Secundárias):** Visualizador interativo de servidores MCP, gerenciador de habilidades dinâmicas e painel avançado de configurações de chaves.
-* **Fase 4 (Mobile/Companion App):** Visualização compacta e drawer responsivo para monitoramento remoto de tarefas longas do agente.
+ODIN operates within a persistent Desktop Application Shell consisting of:
+- **Persistent Left Sidebar:** Brand mark, primary navigation (`Dashboard`, `Chat`, `Tools`, `Skills`, `Permissions`, `System`), node runtime indicator (`LOCAL_01`), and version tag.
+- **Top System Telemetry Bar:** Connection state (`ONLINE`), provider, model, tool counter, UTC clock, and system utilities.
+- **Bottom Command Bar:** Floating Spotlight-inspired input (`Message ODIN or invoke command... ⌘K`) accessible globally.
+
+### 4.1 Screen 1: Command Dashboard (`{{DATA:SCREEN:SCREEN_9}}`)
+- **Central ODIN Core:** Minimalist, concentric geometric orbital rings centering on the ODIN diamond glyph. Displays ambient respiration animation and status readouts (`Online · Ready`, `Gemini 2.5 Flash`, working directory).
+- **System Metrics Bar:** Compact Activity Monitor instrumentation for CPU load (with core count), Memory allocation, Disk capacity, and Uptime.
+- **Action Required Console:** High-priority intercept panel previewing pending approvals directly on the dashboard with direct 1-click `Approve` / `Deny` pathways.
+- **System Events Stream:** Live chronological feed of tool executions, prompt analyses, and runtime triggers.
+
+### 4.2 Screen 2: AI Terminal & Chat (`{{DATA:SCREEN:SCREEN_7}}`)
+- **Session Ledger (Left):** Compact chronological session drawer with active thread markers (`Active`, `Yesterday`, archived dates).
+- **Execution Timeline:** Clean vertical flow separating human commands and ODIN agent reasoning via typographic rhythm and whitespace rather than rounded chat bubbles.
+- **Subtle Tool Disclosures:** Collapsible cards representing tool execution states (e.g. `✓ filesystem.search_files · 48ms`).
+- **Inline Intercept Widget:** Embedded syntax-highlighted differential viewer (`diff · app/cli_modern.py`) allowing instant code execution verification without context switching.
+- **Runtime Metrics Footer:** Local cache retention gauge (e.g., `84%`, `41.2k tokens`).
+
+### 4.3 Screen 3: Tool Registry (`{{DATA:SCREEN:SCREEN_5}}`)
+- **Categorized Directory:** macOS System Settings-style master-detail view grouping tools under logical domains (`FILESYSTEM`, `SHELL`).
+- **Tool Cards:** Indicator badges denoting authorization policies (`Auto-permit`, `Requires approval`, `Conditional`).
+- **Tool Inspector Pane (Right):** Full parameter schema definition, approval policy description, sandbox boundary details, and a JSON payload preview with a `Run Simulation` sandbox runner.
+
+### 4.4 Screen 4: Security & Permissions Console (`{{DATA:SCREEN:SCREEN_3}}`)
+- **Security Posture Overview:** Three key telemetry cards:
+  1. *Security Posture:* Enforcement boundary (e.g., `Strict Bounds: Filesystem & Execution Isolation Active`).
+  2. *Pending Decisions:* Active intercept queue with countdown timers (e.g., `Auto-revoke in 180s`).
+  3. *Authorizations Ratio:* Visual progress gauge comparing approved vs. denied actions (`14 Approved / 02 Denied`).
+- **Action Queue Item:** Deep inspection card with target absolute file specifier, cryptographic Blake3 digest stamp, interception rationale, and full unified red/green diff preview.
+- **Audit Ledger:** Searchable, exportable (`Export CSV`) table recording timestamp, tool name, operation, target path, risk classification, and authorization result.
+
+---
+
+## 5. Security & Execution Governance Requirements
+
+1. **Hardware & Local-First Integrity:** All operations default to local execution boundaries (`node_01.local`). No unauthorized network egress.
+2. **Explicit User Signature:** Any destructive write operation (`filesystem.write_file`, `filesystem.delete_file`) or arbitrary code execution (`shell.execute_command`) mandates explicit user sign-off.
+3. **Cryptographic Traceability:** Intercepted actions are logged with monotonic session IDs and Blake3 content digests to prevent MITM tampering.
+4. **Time-Out Interception:** Unapproved actions in the queue automatically revoke after 180 seconds by default.
+
+---
+
+## 6. Implementation Deliverables & Canvas Assets
+
+- **App Shells:** Persistent desktop layout frameworks with responsive status bar and system navigation (`{{DATA:SHELL:SHELL_10}}`, `{{DATA:SHELL:SHELL_8}}`, `{{DATA:SHELL:SHELL_6}}`, `{{DATA:SHELL:SHELL_4}}`).
+- **Assembled High-Fidelity Screens:**
+  - `{{DATA:SCREEN:SCREEN_9}}`: *ODIN - Command Dashboard (Refined)*
+  - `{{DATA:SCREEN:SCREEN_7}}`: *ODIN - AI Terminal & Chat (Refined)*
+  - `{{DATA:SCREEN:SCREEN_5}}`: *ODIN - Tool Registry (Refined)*
+  - `{{DATA:SCREEN:SCREEN_3}}`: *ODIN - Security & Permissions (Refined)*
+- **Visual Design System Reference:** `{{DATA:DESIGN_SYSTEM:DESIGN_SYSTEM_2}}` (Tactical Minimalist OS).
