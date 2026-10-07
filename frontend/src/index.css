@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces */
+  --color-surface-canvas: #050505;
+  --color-surface-base: #0B0B0D;
+  --color-surface-container: #111113;
+  --color-surface-elevated: #171719;
+
+  /* Text */
+  --color-text-primary: #F5F5F7;
+  --color-text-secondary: #A1A1A6;
+  --color-text-muted: #6E6E73;
+
+  /* Accents */
+  --color-accent-primary: #FF7A00;
+  --color-accent-secondary: #FF9A3D;
+  --color-accent-subtle: #00D9FF;
+
+  /* Borders */
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+
+  /* Fonts */
+  --font-sans: "Geist", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-surface-canvas);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Custom utility classes */
+.bg-surface-canvas { background-color: var(--color-surface-canvas); }
+.bg-surface-base { background-color: var(--color-surface-base); }
+.bg-surface-container { background-color: var(--color-surface-container); }
+.bg-surface-elevated { background-color: var(--color-surface-elevated); }
+
+.text-primary { color: var(--color-text-primary); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-muted { color: var(--color-text-muted); }
+
+.text-accent-primary { color: var(--color-accent-primary); }
+.text-accent-secondary { color: var(--color-accent-secondary); }
+.text-accent-subtle { color: var(--color-accent-subtle); }
+
+.border-subtle { border-color: var(--color-border-subtle); }
+
+.placeholder-muted::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Animation for status indicator */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* Tool execution state animations */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 1.5s linear infinite;
+}
