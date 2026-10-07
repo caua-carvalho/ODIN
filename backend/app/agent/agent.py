@@ -6,8 +6,9 @@ from typing import AsyncIterator, Callable, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import ValidationError
 
-from app.agent.providers.base import LLMMessage, LLMChunk
+from app.agent.providers.base import LLMMessage, LLMChunk, LLMToolCall
 from app.agent.prompts.system import get_system_prompt
 from app.database.models import Conversation, Message
 from app.database.session import get_db_session
@@ -81,7 +82,7 @@ class OdinAgent:
         llm_messages.append(LLMMessage(role="user", content=message))
 
         # Tool definitions for LLM
-        tool_definitions = self.tool_registry.to_gemini_tools()
+        tool_definitions = self.tool_registry.to_llm_tools()
         system_prompt = get_system_prompt()
 
         # Agentic loop
@@ -92,7 +93,7 @@ class OdinAgent:
             logger.info(f"Agent iteration {iteration + 1} for conversation {conversation_id}")
 
             text_buffer = ""
-            tool_calls_this_turn: list[dict] = []
+            tool_calls_this_turn: list[LLMToolCall] = []
 
             async for chunk in self.provider.generate(
                 messages=llm_messages,
@@ -105,11 +106,12 @@ class OdinAgent:
 
                 elif chunk.type == "tool_call":
                     tool_calls_this_turn.append(
-                        {
-                            "id": chunk.tool_call_id,
-                            "name": chunk.tool_name,
-                            "arguments": chunk.tool_arguments or {},
-                        }
+                        LLMToolCall(
+                            id=chunk.tool_call_id or str(uuid.uuid4()),
+                            name=chunk.tool_name or "",
+                            arguments=chunk.tool_arguments or {},
+                            metadata=chunk.metadata,
+                        )
                     )
 
                 elif chunk.type == "error":
@@ -142,9 +144,9 @@ class OdinAgent:
 
             # Execute tool calls
             for tc in tool_calls_this_turn:
-                tool_name = tc["name"]
-                tool_args = tc["arguments"]
-                call_id = tc["id"]
+                tool_name = tc.name
+                tool_args = tc.arguments
+                call_id = tc.id
 
                 logger.info(f"Tool call: {tool_name}({json.dumps(tool_args)[:100]})")
 
@@ -249,9 +251,11 @@ class OdinAgent:
         if msg.metadata_json:
             try:
                 meta = json.loads(msg.metadata_json)
-                tool_calls = meta.get("tool_calls")
-            except (json.JSONDecodeError, AttributeError):
-                pass
+                raw_calls = meta.get("tool_calls")
+                if raw_calls:
+                    tool_calls = [LLMToolCall.model_validate(tc) for tc in raw_calls]
+            except (json.JSONDecodeError, AttributeError, TypeError, ValidationError):
+                tool_calls = None
 
         return LLMMessage(
             role=msg.role,
