@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database.session import init_db
 from app.agent.agent import OdinAgent
-from app.agent.providers.gemini import GeminiProvider
+from app.agent.providers import create_llm_provider
 from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
@@ -58,16 +58,8 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Registered {len(tool_registry)} tools: {tool_registry.names()}")
 
-    # Initialize LLM provider
-    provider = None
-    if settings.odin_model_provider == "gemini":
-        try:
-            provider = GeminiProvider()
-            logger.info(f"Gemini provider initialized: {settings.odin_model}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini: {e}")
-    else:
-        logger.warning(f"Unknown provider: {settings.odin_model_provider}")
+    # Initialize LLM provider (selection lives in providers/factory.py)
+    provider = create_llm_provider(settings)
 
     # Initialize agent
     odin_agent = OdinAgent(

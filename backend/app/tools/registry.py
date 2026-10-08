@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 
+from app.agent.providers.base import LLMTool
 from app.tools.base import BaseTool, ToolDefinition
 
 logger = logging.getLogger("odin.tools.registry")
@@ -33,19 +34,19 @@ class ToolRegistry:
     def definitions(self) -> List[ToolDefinition]:
         return [t.definition for t in self._tools.values()]
 
-    def to_gemini_tools(self) -> list[dict]:
-        """Convert all tools to Gemini function declarations format."""
-        declarations = []
-        for tool in self._tools.values():
-            defn = tool.definition
-            declarations.append(
-                {
-                    "name": defn.name,
-                    "description": defn.description,
-                    "parameters": defn.parameters_schema,
-                }
+    def to_llm_tools(self) -> list[LLMTool]:
+        """Convert all tools to provider-agnostic LLM tool definitions.
+
+        Each provider translates these into its own tool format.
+        """
+        return [
+            LLMTool(
+                name=tool.definition.name,
+                description=tool.definition.description,
+                parameters=tool.definition.parameters_schema,
             )
-        return declarations
+            for tool in self._tools.values()
+        ]
 
     def __len__(self) -> int:
         return len(self._tools)

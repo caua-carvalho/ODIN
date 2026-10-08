@@ -13,13 +13,16 @@ class Settings(BaseSettings):
 
     # LLM
     odin_model_provider: str = "gemini"
-    odin_model: str = "gemini-2.0-flash"
+    odin_model: str = "gemini-2.5-flash"
 
-    # API Keys
+    # API Keys / provider-specific settings
     gemini_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
+    # Ollama "think" parameter. Reasoning models (e.g. qwen3) return empty
+    # responses/tool calls with thinking enabled, so the default is false.
+    ollama_think: bool = False
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./odin.db"
