@@ -3,9 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import { conversationsApi } from '../api/conversations';
 import { permissionsApi } from '../api/permissions';
 import { usePolling } from '../hooks/usePolling';
+import { useHotkeys } from '../hooks/useHotkeys';
 import { useOdinSession, type TimelineEntry } from '../hooks/useOdinSession';
 import { ToolExecution } from '../components/ToolExecution';
 import { PermissionRequestCard } from '../components/PermissionRequestCard';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Button } from '../components/ui/Button';
 import { useWsStatus } from '../layouts/ws-status';
 import { cn, formatRelativeTime } from '../lib/utils';
@@ -28,6 +30,8 @@ export function ChatPage() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const timelineEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -85,16 +89,24 @@ export function ChatPage() {
     }
   };
 
-  const handleDeleteConversation = async (conv: Conversation) => {
-    if (!confirm(`Delete conversation "${conv.title}"?`)) return;
+  const handleDeleteConversation = (conv: Conversation) => {
+    setDeleteTarget(conv);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await conversationsApi.deleteConversation(conv.id);
-      if (conversationId === conv.id) {
+      await conversationsApi.deleteConversation(deleteTarget.id);
+      if (conversationId === deleteTarget.id) {
         setSearchParams({});
       }
       conversations.refresh();
     } catch (err) {
       console.error('Failed to delete conversation', err);
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -108,16 +120,47 @@ export function ChatPage() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Enter sends, Shift+Enter inserts a newline. Ctrl/Cmd+Enter is handled by the
+    // global hotkey below (same action, browser-agnostic key naming).
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       handleSubmit();
     }
   };
 
+  const cycleConversation = useCallback(
+    (direction: 1 | -1) => {
+      const list = conversations.data ?? [];
+      if (list.length <= 1 || !conversationId) return;
+      const index = list.findIndex((c) => c.id === conversationId);
+      const target = list[(index + direction + list.length) % list.length];
+      if (target) handleSelectConversation(target);
+    },
+    [conversations.data, conversationId]
+  );
+
+  // Chat-specific shortcuts. Plain keys (n, r, [, ]) never fire while typing.
+  useHotkeys({
+    'mod+enter': (e) => {
+      e.preventDefault();
+      handleSubmit();
+    },
+    'mod+/': (e) => {
+      e.preventDefault();
+      textareaRef.current?.focus();
+    },
+    n: () => handleCreateConversation(),
+    r: () => conversations.refresh(),
+    '[': () => cycleConversation(-1),
+    ']': () => cycleConversation(1),
+  });
+
   const activeConv = conversations.data?.find((c) => c.id === conversationId);
 
   return (
     <div className="flex h-full gap-4 max-w-[1600px] mx-auto">
+      <h1 className="sr-only">Chat</h1>
+
       {/* Session ledger */}
       <aside
         className={cn(
@@ -135,7 +178,7 @@ export function ChatPage() {
             aria-label="New conversation"
             title="New conversation"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
           </Button>
         </div>
 
@@ -193,7 +236,7 @@ export function ChatPage() {
                   aria-label={`Delete conversation ${conv.title}`}
                   title="Delete"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </div>
             );
@@ -210,7 +253,7 @@ export function ChatPage() {
             className="md:hidden text-muted hover:text-primary focus-ring rounded"
             aria-label="Toggle sessions panel"
           >
-            <MessageSquare className="w-4 h-4" />
+            <MessageSquare className="w-4 h-4" aria-hidden="true" />
           </button>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-primary truncate">
@@ -237,7 +280,7 @@ export function ChatPage() {
             aria-label="Reload conversation history"
             title="Reload history"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
           </button>
         </div>
 
@@ -360,11 +403,11 @@ export function ChatPage() {
                 loading={sending}
                 aria-label="Send message"
               >
-                <SendHorizonal className="w-4 h-4" />
+                <SendHorizonal className="w-4 h-4" aria-hidden="true" />
               </Button>
             </div>
             <p className="text-xs text-muted mt-1.5 font-mono">
-              Enter to send · Shift+Enter for newline
+              Enter sends · Shift+Enter newline · Ctrl+Enter send · <kbd className="kbd">⌘K</kbd> commands
               {conversationId && !session.wsConnected && (
                 <span className="text-red-400"> · WebSocket disconnected</span>
               )}
@@ -372,6 +415,18 @@ export function ChatPage() {
           </div>
         </form>
       </div>
+
+      {/* Accessible delete confirmation (replaces window.confirm) */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete conversation?"
+        description={
+          deleteTarget ? `“${deleteTarget.title}” will be permanently removed. This cannot be undone.` : ''
+        }
+        busy={deleting}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
@@ -406,7 +461,7 @@ const MessageView = memo(function MessageView({ message }: { message: { role: st
   }
 
   return (
-    <article className={cn('group relative pl-4', isUser ? 'border-l-2 border-accent-primary' : 'border-l-2 border-accent-subtle/40')}>
+    <article className={cn('animate-entry group relative pl-4', isUser ? 'border-l-2 border-accent-primary' : 'border-l-2 border-accent-subtle/40')}>
       <header className="flex items-center gap-2 mb-1.5">
         <span
           className={cn(

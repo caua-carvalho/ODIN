@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { cn } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { Separator } from '../components/ui/Separator';
@@ -16,6 +17,8 @@ interface SidebarProps {
   activePage: string;
   onNavigate: (page: string) => void;
   healthData?: HealthResponse;
+  /** Ref to the first navigation button, focused when the mobile drawer opens. */
+  firstNavRef?: RefObject<HTMLButtonElement | null>;
 }
 
 const navigation = [
@@ -27,15 +30,20 @@ const navigation = [
   { id: 'system', label: 'System', icon: HardDrive },
 ];
 
-export function Sidebar({ isOpen, activePage, onNavigate, healthData }: SidebarProps) {
-  if (!isOpen) return null;
-
+export function Sidebar({ isOpen, activePage, onNavigate, healthData, firstNavRef }: SidebarProps) {
   const isReady = healthData?.status === 'online' && healthData.agent_ready;
 
   return (
     <aside
-      className="fixed left-0 top-0 z-40 h-full w-64 bg-surface-base border-r border-subtle flex flex-col"
+      id="app-navigation"
+      className={cn(
+        'fixed left-0 top-0 z-40 h-full w-64 bg-surface-base border-r border-subtle flex flex-col',
+        // Slide drawer in/out instead of unmounting, so the transition is animatable.
+        'motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out',
+        isOpen ? 'translate-x-0' : '-translate-x-full'
+      )}
       aria-label="Main navigation"
+      inert={!isOpen}
     >
       {/* Brand header */}
       <div className="flex items-center h-16 px-5 border-b border-subtle">
@@ -49,13 +57,14 @@ export function Sidebar({ isOpen, activePage, onNavigate, healthData }: SidebarP
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-thin" aria-label="Primary navigation">
-        {navigation.map((item) => {
+        {navigation.map((item, index) => {
           const Icon = item.icon;
           const isActive = activePage === item.id;
 
           return (
             <Button
               key={item.id}
+              ref={index === 0 ? firstNavRef : undefined}
               variant={isActive ? 'primary' : 'ghost'}
               size="md"
               className="w-full justify-start gap-3 px-3 rounded-xl"
@@ -103,6 +112,15 @@ export function Sidebar({ isOpen, activePage, onNavigate, healthData }: SidebarP
         <div className="flex items-center justify-between text-xs font-mono">
           <span className="text-secondary">LOCAL_01</span>
           <span className="text-muted">{healthData ? `v${healthData.version}` : 'v—'}</span>
+        </div>
+
+        {/* Shortcut hints */}
+        <div className="flex items-center gap-1.5 font-mono">
+          <kbd className="kbd">⌘K</kbd>
+          <span className="text-[11px] text-muted">commands</span>
+          <span className="text-muted">·</span>
+          <kbd className="kbd">?</kbd>
+          <span className="text-[11px] text-muted">help</span>
         </div>
       </div>
     </aside>

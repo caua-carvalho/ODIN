@@ -71,6 +71,21 @@ export function PermissionsPage() {
     pendingPermissions.refresh();
   };
 
+  /** WAI-ARIA tabs: ArrowLeft/Right cycle, Home/End jump, active tab keeps tabIndex 0. */
+  const handleTabKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const current = STATUS_TABS.findIndex((t) => t.id === statusFilter);
+    let next = current;
+    if (e.key === 'ArrowRight') next = (current + 1) % STATUS_TABS.length;
+    else if (e.key === 'ArrowLeft') next = (current - 1 + STATUS_TABS.length) % STATUS_TABS.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = STATUS_TABS.length - 1;
+    else return;
+    e.preventDefault();
+    const target = STATUS_TABS[next];
+    setStatusFilter(target.id);
+    requestAnimationFrame(() => document.getElementById(`status-tab-${target.id}`)?.focus());
+  };
+
   if (allPermissions.loading && !allPermissions.data) {
     return (
       <div className="flex items-center justify-center h-64" role="status" aria-label="Loading permissions">
@@ -241,28 +256,32 @@ export function PermissionsPage() {
                 className="flex items-center gap-1 bg-surface-elevated rounded-xl p-1"
                 role="tablist"
                 aria-label="Filter by status"
+                onKeyDown={handleTabKeyDown}
               >
-              {STATUS_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setStatusFilter(tab.id)}
-                  role="tab"
-                  aria-selected={statusFilter === tab.id}
-                  className={cn(
-                    'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors focus-ring',
-                    statusFilter === tab.id
-                      ? 'bg-accent-primary text-white'
-                      : 'text-secondary hover:text-primary'
-                  )}
-                >
-                  {tab.label} ({counts[tab.id]})
-                </button>
-              ))}
+                {STATUS_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    id={`status-tab-${tab.id}`}
+                    onClick={() => setStatusFilter(tab.id)}
+                    role="tab"
+                    aria-selected={statusFilter === tab.id}
+                    aria-controls="permissions-panel"
+                    tabIndex={statusFilter === tab.id ? 0 : -1}
+                    className={cn(
+                      'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors focus-ring',
+                      statusFilter === tab.id
+                        ? 'bg-accent-primary text-white'
+                        : 'text-secondary hover:text-primary'
+                    )}
+                  >
+                    {tab.label} ({counts[tab.id]})
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="py-0">
+        <CardContent className="py-0" id="permissions-panel" role="tabpanel" aria-labelledby="status-tab-all">
           {filtered.length === 0 ? (
             <div className="py-10 text-center">
               <Clock className="w-8 h-8 text-muted mx-auto mb-3" aria-hidden="true" />

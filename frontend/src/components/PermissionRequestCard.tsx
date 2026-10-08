@@ -47,14 +47,14 @@ export function PermissionRequestCard({
   return (
     <div
       className={cn(
-        'rounded-xl border bg-surface-container',
+        'animate-entry rounded-xl border bg-surface-container',
         isPending ? 'border-accent-primary/40 shadow-[0_0_24px_rgba(255,122,0,0.08)]' : 'border-subtle'
       )}
       role="region"
       aria-label={`Permission request for ${permission.tool}`}
     >
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-subtle">
-        <ShieldAlert className={cn('w-4 h-4', isPending ? 'text-accent-primary' : 'text-muted')} />
+        <ShieldAlert className={cn('w-4 h-4', isPending ? 'text-accent-primary' : 'text-muted')} aria-hidden="true" />
         <span className="text-xs font-medium uppercase tracking-wider text-secondary">
           Permission Intercept
         </span>
@@ -124,9 +124,9 @@ export function PermissionRequestCard({
               aria-label={`Deny permission for ${permission.tool}`}
             >
               {actionLoading === 'deny' ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
               ) : (
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               )}
               DENY
             </button>
@@ -141,9 +141,9 @@ export function PermissionRequestCard({
               aria-label={`Approve permission for ${permission.tool}`}
             >
               {actionLoading === 'approve' ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
               ) : (
-                <Check className="w-4 h-4" />
+                <Check className="w-4 h-4" aria-hidden="true" />
               )}
               APPROVE
             </button>
