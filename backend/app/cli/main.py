@@ -97,7 +97,14 @@ class OdinCLI:
             )
 
         elif event_type == "permission_request":
-            self.renderer.permission_request()
+            await self._handle_permission_request(event)
+
+        elif event_type == "permission_resolved":
+            # Broadcast by the backend whenever any client (this CLI, the
+            # web frontend, or a timeout) resolves a request. Our own
+            # decision is already rendered after the HTTP call confirms
+            # it, so there is nothing extra to display here.
+            pass
 
         elif event_type == "error":
             self.renderer.error(
@@ -106,6 +113,53 @@ class OdinCLI:
 
         elif event_type == "done":
             self.renderer.done()
+
+    async def _handle_permission_request(self, event: dict) -> None:
+        """Interactive approval flow for a permission_request event.
+
+        Renders the operation, asks the user for a decision and forwards
+        it to the backend, which resolves the agent's pending future.
+        The flow blocks only while waiting for input (async prompt), so
+        the event loop and the WebSocket stay alive.
+        """
+        request_id = event.get("id")
+
+        if not request_id:
+            # Without the original id the decision cannot reach the
+            # backend: treat the operation as NOT approved.
+            self.renderer.permission_request(event)
+            self.renderer.permission_failed(
+                "Event has no request id."
+            )
+            return
+
+        self.renderer.permission_request(event)
+
+        # Capture the decision (invalid input re-prompts, interrupt
+        # denies - this can never approve by accident).
+        try:
+            approved = await self.prompt.ask_approval()
+        except Exception:  # defensive: input failure must deny, not approve
+            approved = False
+
+        # Send the decision to the backend. `confirmed` is True only
+        # when the backend acknowledged the approval; None means the
+        # communication failed and the operation is not approved.
+        try:
+            confirmed = await self.client.resolve_permission(
+                request_id=request_id,
+                approved=approved,
+            )
+        except Exception as exc:  # defensive: never ignore failures
+            self.renderer.permission_failed(str(exc))
+            return
+
+        if confirmed is None:
+            self.renderer.permission_failed()
+        elif confirmed:
+            self.renderer.permission_approved()
+        else:
+            self.renderer.permission_denied()
 
 
 def main() -> None:
