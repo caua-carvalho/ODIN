@@ -182,7 +182,7 @@ export function ChatPage() {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="flex-1 overflow-y-auto max-h-[400px] scrollbar-thin">
           {conversations.loading && (
             <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversations">
               <Loader2 className="w-5 h-5 text-accent-primary animate-spin" />
@@ -286,7 +286,7 @@ export function ChatPage() {
 
         {/* Execution timeline */}
         <div
-          className="flex-1 overflow-y-auto scrollbar-thin px-4 md:px-8 py-6"
+          className="flex-1 overflow-y-auto max-h-[70vh] scrollbar-thin px-4 md:px-8 py-6"
           onScroll={handleScroll}
           role="log"
           aria-label="Execution timeline"
