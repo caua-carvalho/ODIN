@@ -54,7 +54,7 @@ class OdinCLI:
             if not message:
                 continue
 
-            command_result = self.commands.execute(message)
+            command_result = await self.commands.execute(message)
 
             if command_result == "exit":
                 self.renderer.goodbye()

@@ -22,8 +22,9 @@ ODIN_WHITE = "#F5F5F5"
 COMMANDS = {
     "/help": "Show available commands",
     "/clear": "Clear the terminal",
-    "/status": "Show Odin connection status",
-    "/model": "Show current LLM model",
+    "/status": "Show Odin backend status",
+    "/model": "Show or change the active model",
+    "/models": "List available models",
     "/workspace": "Show current workspace",
     "/tools": "Show available tools",
     "/exit": "Exit Odin",
