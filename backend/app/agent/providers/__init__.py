@@ -5,6 +5,7 @@ the `create_llm_provider` factory. Concrete providers are imported lazily
 by the factory.
 """
 
+from app.agent.providers import catalog
 from app.agent.providers.base import (
     LLMChunk,
     LLMMessage,
@@ -20,5 +21,6 @@ __all__ = [
     "LLMProvider",
     "LLMTool",
     "LLMToolCall",
+    "catalog",
     "create_llm_provider",
 ]

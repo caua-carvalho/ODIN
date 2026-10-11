@@ -39,6 +39,12 @@ from app.agent.providers.ollama import (
     _build_ollama_tools,
     _chunks_from_event,
 )
+from app.agent.providers.groq import (
+    GroqProvider,
+    _build_groq_messages,
+    _build_groq_tools,
+    _finalize_tool_calls,
+)
 from app.config import Settings
 from app.tools.registry import ToolRegistry
 from google.genai import types
@@ -98,6 +104,76 @@ class TestToolConversion:
                 },
             }
         ]
+
+    def test_groq_tool_conversion(self):
+        result = _build_groq_tools([GENERIC_TOOL])
+        assert result == [
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_directory",
+                    "description": "List files",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+
+    def test_groq_messages_round_trip(self):
+        msgs = [
+            LLMMessage(role="user", content="hi"),
+            LLMMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_1",
+                        name="get_weather",
+                        arguments={"city": "Paris"},
+                    )
+                ],
+            ),
+            LLMMessage(
+                role="tool",
+                content='{"temp_c": 18}',
+                tool_call_id="call_1",
+                tool_name="get_weather",
+            ),
+        ]
+        result = _build_groq_messages(msgs, system="be brief")
+        assert result[0] == {"role": "system", "content": "be brief"}
+        assert result[1] == {"role": "user", "content": "hi"}
+        assert result[2] == {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": '{"city": "Paris"}',
+                    },
+                }
+            ],
+        }
+        assert result[3] == {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": '{"temp_c": 18}',
+        }
+
+    def test_groq_finalize_tool_calls_accumulates_deltas(self):
+        states = {
+            0: {"id": "call_1", "name": "get_weather", "arguments": '{"city": "Par'},
+            1: {"id": "call_2", "name": "get_weather", "arguments": '{"city":"Lisboa"}'},
+        }
+        states[0]["arguments"] += 'is"}'
+        chunks = _finalize_tool_calls(states)
+        assert len(chunks) == 2
+        assert chunks[0].tool_call_id == "call_1"
+        assert chunks[0].tool_name == "get_weather"
+        assert chunks[0].tool_arguments == {"city": "Paris"}
+        assert chunks[1].tool_arguments == {"city": "Lisboa"}
 
     def test_tool_registry_returns_llm_tools(self):
         registry = ToolRegistry()
@@ -518,6 +594,27 @@ class TestFactory:
         assert isinstance(provider, GeminiProvider)
         assert provider.model == "gemini-2.0-flash"
 
+    def test_creates_groq_provider(self):
+        s = Settings(
+            odin_model_provider="groq",
+            odin_model="openai/gpt-oss-120b",
+            groq_api_key="test-key",
+            _env_file=None,
+        )
+        provider = create_llm_provider(s)
+        assert isinstance(provider, GroqProvider)
+        assert provider.model == "openai/gpt-oss-120b"
+        assert provider.base_url == "https://api.groq.com/openai/v1"
+
+    def test_groq_without_api_key_raises(self):
+        s = Settings(
+            odin_model_provider="groq",
+            groq_api_key="",
+            _env_file=None,
+        )
+        with pytest.raises(ValueError, match="GROQ_API_KEY"):
+            create_llm_provider(s)
+
     def test_provider_name_is_normalized(self):
         s = Settings(
             odin_model_provider="  OLLAMA ",
@@ -533,7 +630,7 @@ class TestFactory:
             create_llm_provider(s)
         message = str(exc.value)
         assert "Unsupported LLM provider: xyz" in message
-        assert "Supported providers: gemini, ollama" in message
+        assert "Supported providers: gemini, groq, ollama" in message
 
     def test_gemini_without_api_key_raises(self):
         s = Settings(

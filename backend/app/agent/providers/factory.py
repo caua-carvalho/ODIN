@@ -21,6 +21,16 @@ def _build_gemini(settings: Settings) -> LLMProvider:
     return GeminiProvider(model=settings.odin_model, api_key=settings.gemini_api_key)
 
 
+def _build_groq(settings: Settings) -> LLMProvider:
+    from app.agent.providers.groq import GroqProvider
+
+    return GroqProvider(
+        model=settings.odin_model,
+        api_key=settings.groq_api_key,
+        base_url=settings.groq_base_url,
+    )
+
+
 def _build_ollama(settings: Settings) -> LLMProvider:
     from app.agent.providers.ollama import OllamaProvider
 
@@ -33,6 +43,7 @@ def _build_ollama(settings: Settings) -> LLMProvider:
 
 PROVIDER_BUILDERS: dict[str, Callable[[Settings], LLMProvider]] = {
     "gemini": _build_gemini,
+    "groq": _build_groq,
     "ollama": _build_ollama,
 }
 

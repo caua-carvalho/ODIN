@@ -17,8 +17,10 @@ class Settings(BaseSettings):
 
     # API Keys / provider-specific settings
     gemini_api_key: str = ""
+    groq_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
     ollama_base_url: str = "http://localhost:11434"
     # Ollama "think" parameter. Reasoning models (e.g. qwen3) return empty
     # responses/tool calls with thinking enabled, so the default is false.

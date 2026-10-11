@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database.session import init_db
 from app.agent.agent import OdinAgent
-from app.agent.providers import create_llm_provider
+from app.agent.providers import catalog, create_llm_provider
 from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
@@ -60,6 +60,8 @@ async def lifespan(app: FastAPI):
 
     # Initialize LLM provider (selection lives in providers/factory.py)
     provider = create_llm_provider(settings)
+    # Record the active selection so /api/health and the selectors can report it.
+    catalog.set_active(settings.odin_model_provider, settings.odin_model)
 
     # Initialize agent
     odin_agent = OdinAgent(
@@ -91,7 +93,7 @@ app.add_middleware(
 )
 
 # Mount routers
-from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat
+from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers
 
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
@@ -99,16 +101,18 @@ app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(permissions.router, prefix="/api/permissions", tags=["permissions"])
 app.include_router(mcp.router, prefix="/api/mcp", tags=["mcp"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
+app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 
 
 @app.get("/api/health")
 async def health():
+    active = catalog.get_active()
     return {
         "status": "online",
         "version": "0.1.0",
-        "model_provider": settings.odin_model_provider,
-        "model": settings.odin_model,
+        "model_provider": active.provider if active else settings.odin_model_provider,
+        "model": active.model if active else settings.odin_model,
         "workspace": settings.odin_workspace,
         "tools_count": len(tool_registry),
         "agent_ready": odin_agent is not None and odin_agent.provider is not None,
