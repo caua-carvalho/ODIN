@@ -5,6 +5,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database.session import init_db
@@ -117,3 +119,35 @@ async def health():
         "tools_count": len(tool_registry),
         "agent_ready": odin_agent is not None and odin_agent.provider is not None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Web panel (built frontend)
+# ---------------------------------------------------------------------------
+# Serve the Vite build so the console is available on the same origin as the
+# API (http://127.0.0.1:8000). The panel is a React SPA, so any unknown
+# non-API path falls back to index.html for client-side routing.
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+if FRONTEND_DIST.is_dir():
+    _assets_dir = FRONTEND_DIST / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_web_panel(full_path: str) -> FileResponse:
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        if (
+            full_path
+            and candidate.is_file()
+            and candidate.is_relative_to(FRONTEND_DIST.resolve())
+        ):
+            return FileResponse(candidate)
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    logger.info(f"Web panel served from {FRONTEND_DIST}")
+else:
+    logger.warning(
+        "frontend/dist not found — the web panel will not be served. "
+        "Run `npm run build` inside frontend/ to generate it."
+    )
