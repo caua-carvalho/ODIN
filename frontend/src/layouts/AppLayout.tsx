@@ -72,29 +72,29 @@ export function AppLayout() {
   }, [location.pathname]);
 
   // Fetch health data on mount and periodically
-  useEffect(() => {
-    const fetchHealth = async () => {
-      try {
-        const data = await healthApi.getHealth();
-        setHealthData(data);
-      } catch (err) {
-        console.error('Failed to fetch health:', err);
-        setHealthData({
-          status: 'offline',
-          version: '0.1.0',
-          model_provider: 'unknown',
-          model: 'unknown',
-          workspace: '',
-          tools_count: 0,
-          agent_ready: false,
-        });
-      }
-    };
+  const fetchHealth = useCallback(async () => {
+    try {
+      const data = await healthApi.getHealth();
+      setHealthData(data);
+    } catch (err) {
+      console.error('Failed to fetch health:', err);
+      setHealthData({
+        status: 'offline',
+        version: '0.1.0',
+        model_provider: 'unknown',
+        model: 'unknown',
+        workspace: '',
+        tools_count: 0,
+        agent_ready: false,
+      });
+    }
+  }, []);
 
+  useEffect(() => {
     fetchHealth();
     const interval = setInterval(fetchHealth, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchHealth]);
 
   // Lock body scroll while the mobile drawer is open so the page behind doesn't move.
   useEffect(() => {
@@ -218,6 +218,7 @@ export function AppLayout() {
           healthData={healthData || undefined}
           wsConnected={wsConnected}
           activeConversationTitle={activeConversationTitle}
+          onRefreshHealth={fetchHealth}
         />
 
         {/* Page content — keyed by path so routes fade in and scroll resets */}

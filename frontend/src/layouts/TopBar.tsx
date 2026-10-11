@@ -2,6 +2,7 @@ import { useEffect, useState, type RefObject } from 'react';
 import { Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from '../components/ui/Button';
+import { ModelSelector } from '../components/ModelSelector';
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -18,6 +19,8 @@ interface TopBarProps {
   };
   wsConnected: boolean;
   activeConversationTitle?: string;
+  /** Refreshes health immediately after a provider/model switch. */
+  onRefreshHealth?: () => void;
 }
 
 export function TopBar({
@@ -28,6 +31,7 @@ export function TopBar({
   healthData,
   wsConnected,
   activeConversationTitle,
+  onRefreshHealth,
 }: TopBarProps) {
   const [time, setTime] = useState(() =>
     new Date().toLocaleTimeString('en-US', {
@@ -126,14 +130,11 @@ export function TopBar({
 
         {healthData && (
           <div className="hidden md:flex items-center gap-4 text-xs text-secondary">
-            <div className="flex items-center gap-1">
-              <span className="text-muted">Provider:</span>
-              <span className="font-mono text-primary">{healthData.model_provider}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-muted">Model:</span>
-              <span className="font-mono text-primary">{healthData.model}</span>
-            </div>
+            <ModelSelector
+              provider={healthData.model_provider}
+              model={healthData.model}
+              onChanged={onRefreshHealth}
+            />
             <div className="flex items-center gap-1">
               <span className="text-muted">Tools:</span>
               <span className="font-mono text-primary">{healthData.tools_count}</span>
