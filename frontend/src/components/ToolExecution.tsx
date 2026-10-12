@@ -83,7 +83,7 @@ export const ToolExecution = memo(function ToolExecution({ execution }: ToolExec
       <div
         className={cn(
           'grid motion-safe:transition-[grid-template-rows] motion-safe:duration-300 motion-safe:ease-out',
-          expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          expanded ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
         )}
         aria-hidden={!expanded}
       >
