@@ -86,9 +86,15 @@ app = FastAPI(
 )
 
 # CORS
+# Explicit origin allow-list plus a regex that also accepts dev clients served
+# from a private LAN address (e.g. Expo web at http://192.168.0.10:8081).
+_cors_origins = [
+    origin.strip() for origin in settings.odin_cors_origins.split(",") if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins,
+    allow_origin_regex=settings.odin_cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

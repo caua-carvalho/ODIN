@@ -10,8 +10,32 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/odin"
 PID_FILE="$STATE_DIR/server.pid"
 LOG_FILE="$STATE_DIR/server.log"
 
-HOST="${ODIN_HOST:-127.0.0.1}"
-PORT="${ODIN_PORT:-8000}"
+
+# Read a KEY=value from the repo .env without sourcing it (values may contain
+# spaces, e.g. ODIN_WEATHER_CITY=São José dos Campos). An exported shell
+# variable always wins over the .env value.
+env_value() {
+    local key="$1" default="${2:-}" value="" env_file="$ROOT_DIR/.env"
+
+    if [[ -f "$env_file" ]]; then
+        value="$(grep -E "^[[:space:]]*${key}=" "$env_file" | tail -n1 | cut -d= -f2- || true)"
+        value="${value%$'\r'}"
+        # strip one layer of surrounding quotes
+        value="${value%\"}"; value="${value#\"}"
+        value="${value%\'}"; value="${value#\'}"
+        value="${value#"${value%%[![:space:]]*}"}"  # ltrim
+        value="${value%"${value##*[![:space:]]}"}"  # rtrim
+    fi
+
+    if [[ -n "$value" ]]; then
+        printf '%s' "$value"
+    else
+        printf '%s' "$default"
+    fi
+}
+
+HOST="${ODIN_HOST:-$(env_value ODIN_HOST 127.0.0.1)}"
+PORT="${ODIN_PORT:-$(env_value ODIN_PORT 8000)}"
 
 mkdir -p "$STATE_DIR"
 
