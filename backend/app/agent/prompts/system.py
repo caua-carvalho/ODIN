@@ -1,4 +1,5 @@
 from app.config import settings
+from app.agent.prompts.display import DISPLAY_PROMPT
 
 
 SYSTEM_PROMPT = """You are Odin, a personal AI assistant running on the user's Linux machine.
@@ -30,7 +31,6 @@ You have full autonomy inside the workspace. For operations outside it, you'll r
 - Concise and technical
 - Show your work: reference specific files, line numbers, and findings
 - Avoid lengthy preambles
-- Use markdown formatting for code and file paths
 
 ## Security
 You operate within a security policy. When operations require user approval, the system will 
@@ -39,4 +39,4 @@ automatically pause and present an authorization dialog. Do not attempt to circu
 
 
 def get_system_prompt() -> str:
-    return SYSTEM_PROMPT.format(workspace=settings.odin_workspace)
+    return SYSTEM_PROMPT.format(workspace=settings.odin_workspace) + "\n\n" + DISPLAY_PROMPT

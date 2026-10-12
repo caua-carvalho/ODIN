@@ -7,6 +7,7 @@ import { useHotkeys } from '../hooks/useHotkeys';
 import { useOdinSession, type TimelineEntry } from '../hooks/useOdinSession';
 import { ToolExecution } from '../components/ToolExecution';
 import { PermissionRequestCard } from '../components/PermissionRequestCard';
+import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Button } from '../components/ui/Button';
 import { useWsStatus } from '../layouts/ws-status';
@@ -182,7 +183,7 @@ export function ChatPage() {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto max-h-[400px] scrollbar-thin">
+        <div className="flex-1 overflow-y-auto max-h-[80vh] scrollbar-thin">
           {conversations.loading && (
             <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversations">
               <Loader2 className="w-5 h-5 text-accent-primary animate-spin" />
@@ -435,7 +436,7 @@ export function ChatPage() {
 const TimelineEntryView = memo(function TimelineEntryView({ entry }: { entry: TimelineEntry }) {
   switch (entry.kind) {
     case 'message':
-      return <MessageView message={entry.message} />;
+      return <MessageView message={entry.message} streaming={entry.streaming} />;
     case 'tool':
       return <ToolExecution execution={entry.execution} />;
     case 'permission':
@@ -443,7 +444,13 @@ const TimelineEntryView = memo(function TimelineEntryView({ entry }: { entry: Ti
   }
 });
 
-const MessageView = memo(function MessageView({ message }: { message: { role: string; content: string; created_at: string } }) {
+const MessageView = memo(function MessageView({
+  message,
+  streaming,
+}: {
+  message: { role: string; content: string; created_at: string };
+  streaming?: boolean;
+}) {
   const isUser = message.role === 'user';
 
   if (message.role === 'tool') {
@@ -475,16 +482,15 @@ const MessageView = memo(function MessageView({ message }: { message: { role: st
           {new Date(message.created_at).toLocaleTimeString()}
         </span>
       </header>
-      <div
-        className={cn(
-          'whitespace-pre-wrap break-words text-sm leading-relaxed',
-          isUser ? 'text-primary' : 'text-secondary'
-        )}
-      >
-        {message.content || (
-          <span className="text-muted italic font-mono text-xs">streaming…</span>
-        )}
-      </div>
+      {isUser ? (
+        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-primary">
+          {message.content}
+        </div>
+      ) : message.content ? (
+        <MarkdownRenderer content={message.content} streaming={streaming} />
+      ) : (
+        <span className="text-muted italic font-mono text-xs">streaming…</span>
+      )}
     </article>
   );
 });
