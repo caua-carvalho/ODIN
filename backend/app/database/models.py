@@ -33,6 +33,15 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AppState(Base):
+    """Small key/value store for process-external state (e.g. boot-once flags)."""
+
+    __tablename__ = "app_state"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 class Project(Base):
     """A user-organised project with a TODO/Kanban board and a file workspace."""
 
@@ -69,15 +78,6 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
-
-
-class AppState(Base):
-    """Small key/value store for process-external state (e.g. boot-once flags)."""
-
-    __tablename__ = "app_state"
-
-    key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, default="")
 
 
 class PermissionRequest(Base):

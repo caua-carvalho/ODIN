@@ -180,7 +180,7 @@ Key facts:
 
 - SQLite async (SQLAlchemy) — file is `odin.db` at the repo root.
 - On every startup, `init_db()` creates tables if they don't exist (`backend/app/database/session.py`).
-- Tables: `conversations`, `messages`, `permission_requests`, `projects`, `tasks`, `app_state` (generic key/value store; holds `last_briefing_boot` for the boot-once briefing).
+- Tables: `conversations`, `messages`, `permission_requests`, `app_state` (generic key/value store; holds `last_briefing_boot` for the boot-once briefing), `projects`, `tasks`.
 - Use `get_db_session()` (context manager) or `get_db()` (FastAPI dependency) for DB access.
 - Permission requests are the mechanism that blocks/unblocks filesystem/shell operations outside the workspace.
 
@@ -202,3 +202,13 @@ Key facts:
 - Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, constant-time compare). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
 - Clients: the mobile app stores the token in its Connect/Settings screen; the web panel reads `localStorage['odin_api_token']` (set it in the browser console).
 - Reaching the backend from a phone requires `ODIN_HOST=0.0.0.0` (the default `127.0.0.1` binds loopback only) — pair it with a token.
+- `scripts/server.sh` (used by `odin start/restart`) reads `ODIN_HOST`/`ODIN_PORT` **from the repo `.env`** (falling back to an exported shell var, then `127.0.0.1:8000`). So setting `ODIN_HOST=0.0.0.0` in `.env` and running `odin restart` is enough — no manual `export` needed.
+- **CORS is only a browser concern** (Vite web panel, Expo **web**). Native Expo Go does not enforce it; its failure mode is `java.net.ConnectException ... 127.0.0.1:8000`, which means the app is still pointing at `127.0.0.1` instead of the machine's LAN IP (`hostname -I`). Set the app's server URL to `http://<lan-ip>:8000`. The allowed origins/regex live in `settings.odin_cors_origins` / `odin_cors_origin_regex` (`main.py`); the defaults include `:3000` (Vite) and `:8081` (Expo web) plus any private-LAN origin.
+
+## Mobile app (`mobile/`)
+
+Expo (SDK 57) + React Native + Expo Router + NativeWind client mirroring the web panel (Dashboard, Chat, Projects TODO/Kanban/Workspace, Permissions, Tools, Skills, System, Settings). It has its own toolchain and `mobile/AGENTS.md`; run its commands from `mobile/` (`npx expo start`, `npx tsc --noEmit`, `npx expo lint`, `npx expo-doctor`). It is **not** part of the Vite build and is not served by the backend.
+
+- First launch shows a `connect` screen (server URL + optional token), persisted via AsyncStorage (`src/lib/config.ts`); the root `Stack.Protected` guard in `src/app/_layout.tsx` reveals the `(tabs)` navigator once configured.
+- Kanban uses real cross-column drag & drop via `react-native-reanimated-dnd` (Draggable cards + Droppable columns); precise ordering lives in the TODO view.
+- Binaries are built with EAS (`mobile/eas.json`): `npx eas-cli@latest build --profile preview` (Android APK) / `production` (AAB + iOS). `ios/` and `android/` are CNG-generated — never edit them by hand.

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Text, View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import { CheckCircle2, XCircle, Server } from 'lucide-react-native';
 
 import { Input } from '../components/ui/Input';
@@ -10,10 +11,29 @@ import { probeHealth } from '../api/health';
 import { useServerConfig } from '../providers/config';
 import type { HealthResponse } from '../types/health';
 
+/** Default port the backend runs on (`ODIN_PORT` in the backend `.env`). */
+const BACKEND_PORT = 8000;
+
+/**
+ * Best-effort default for the server URL. When the app runs under the Expo dev
+ * server (Expo Go on a phone, or Expo web), `hostUri` is the Metro host:port,
+ * e.g. `192.168.1.6:8081`. Reuse only its host with the backend's port so the
+ * IP is always correct and the user just has to confirm the port. Returns ''
+ * when there is no dev host (e.g. a production build), forcing manual input.
+ */
+function defaultServerUrl(): string {
+  const host = Constants.expoConfig?.hostUri?.split(':')[0];
+  if (!host) return '';
+  if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
+    return `http://localhost:${BACKEND_PORT}`;
+  }
+  return `http://${host}:${BACKEND_PORT}`;
+}
+
 export default function ConnectScreen() {
   const { configure } = useServerConfig();
 
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(defaultServerUrl);
   const [token, setToken] = useState('');
   const [testing, setTesting] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -78,14 +98,14 @@ export default function ConnectScreen() {
             <Text className="text-2xl font-bold text-primary tracking-tight">ODIN</Text>
             <Text className="text-center text-sm text-secondary leading-relaxed">
               Conecte o app ao seu servidor Odin. Em um celular, use o IP da máquina na rede (ex.
-              http://192.168.0.10:8000) e garanta que o backend rode com ODIN_HOST=0.0.0.0.
+              http://&lt;ip-da-maquina&gt;:8000) e garanta que o backend rode com ODIN_HOST=0.0.0.0.
             </Text>
           </View>
 
           <View className="gap-3">
             <Input
               label="URL do servidor"
-              placeholder="http://192.168.0.10:8000"
+              placeholder="http://<ip-da-maquina>:8000"
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"

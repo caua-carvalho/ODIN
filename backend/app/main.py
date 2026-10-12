@@ -98,16 +98,22 @@ if settings.odin_api_token:
     logger.info("API token authentication enabled (ODIN_API_TOKEN set)")
 
 # CORS
+# Explicit origin allow-list plus a regex that also accepts dev clients served
+# from a private LAN address (e.g. Expo web at http://192.168.0.10:8081).
+_cors_origins = [
+    origin.strip() for origin in settings.odin_cors_origins.split(",") if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins,
+    allow_origin_regex=settings.odin_cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Mount routers
-from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, projects, briefing
+from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, briefing, projects
 
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
