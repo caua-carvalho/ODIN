@@ -99,6 +99,7 @@ The agent maintains a registry of all available tools, registered during startup
 
 - **Filesystem tools**: `read_file`, `list_directory`, `search_files`, `write_file`, `delete_file`, `move_file`, `create_directory`
 - **Shell tool**: `execute_command`
+- **Project tools**: `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `list_tasks`, `create_task`, `update_task`, `move_task`, `delete_task`, `list_project_files`, `read_project_file`, `write_project_file`, `create_project_directory`, `delete_project_file` (see the Projects section)
 
 Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.to_llm_tools()` (in `backend/app/tools/registry.py`). The registry is a global singleton — if you add a new tool, you must register it in the lifespan section of `main.py`.
 
@@ -107,7 +108,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`. The full suite is ~73 tests and runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence
@@ -138,14 +139,41 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `GET /api/permissions/pending` | List pending permission requests |
 | `POST /api/permissions/{id}/approve` | Approve a permission request |
 | `POST /api/permissions/{id}/deny` | Deny a permission request |
+| `GET/POST /api/projects` | List / create projects |
+| `GET/PATCH/DELETE /api/projects/{id}` | Read / update / delete a project (delete also removes its workspace directory) |
+| `GET/POST /api/projects/{id}/tasks` | List / create tasks (the same rows power the TODO list and the Kanban) |
+| `PATCH/DELETE /api/tasks/{task_id}` | Update (title, status, priority, position) / delete a task |
+| `POST /api/projects/{id}/tasks/reorder` | Bulk-persist Kanban column/order after a drag-and-drop |
+| `GET/POST /api/projects/{id}/files` | List / upload workspace files (multipart `file` + form field `path`) |
+| `GET /api/projects/{id}/files/download` | Download a workspace file (`?path=`) |
+| `POST /api/projects/{id}/files/mkdir` | Create a workspace directory |
+| `DELETE /api/projects/{id}/files` | Delete a workspace file or directory (`?path=`) |
 
 > **Beware the SPA fallback**: `main.py` registers a catch-all `GET /{full_path:path}` that returns `index.html` with **HTTP 200** for any unmatched path. A typo'd API route (e.g. the old `GET /api/system/info`) therefore returns HTML — not a 404 — so always verify the endpoint exists in `/openapi.json` (the catch-all is excluded from the schema).
+
+## Projects (TODO / Kanban / workspace)
+
+The **Projects** tab lets the user organise projects. Each project has three views that share one data model:
+
+- **TODO list** and **Kanban board** are two renderings of the same `tasks` rows: `status` (`todo` | `doing` | `done`) is the Kanban column and `position` orders cards within a column. Editing a task in one view is reflected in the other.
+- **Workspace** is an on-disk folder for arbitrary files (drag-and-drop upload, folder creation, download, delete).
+
+Key facts:
+
+- Project files live at `<ODIN_WORKSPACE>/projects/<slug>/`. Because they are inside the security boundary, the agent's filesystem tools can also read/write them (the daily briefing's "recent files" scan will surface them too).
+- The project root directory is created on project creation and removed (with its contents) when the project is deleted.
+- All file paths are resolved canonically and validated by `resolve_path` in `backend/app/projects/service.py`: absolute paths and `..` traversal are rejected, and nothing may escape the project root. The `slug` is generated from the name (lowercased, non-alphanumerics → `-`, `-2`/`-3` suffix on collision) by `slugify`.
+- **All project domain logic lives in `backend/app/projects/service.py`**, which is the single source of truth for both the REST routes (`app/api/routes/projects.py` is a thin wrapper) and the agent tools (`app/tools/projects/tools.py`). Service functions raise `fastapi.HTTPException` for expected failures (400/404/409); the tools catch them and return `ToolResult(success=False, error=...)`.
+- The 15 project tools are created by `create_project_tools(security_policy)` and registered in the lifespan. They reference a project by **id, slug or (unambiguous) name** (`service.get_project_by_reference`) and a task by **id or (unambiguous) title**; ambiguous references return an error listing the candidates. They all operate inside `ODIN_WORKSPACE`, so the security policy returns ALLOW and no approval is requested.
+- Uploads require **`python-multipart`** (added to `backend/requirements.txt`); re-run `pip install -r requirements.txt` after pulling if it is missing.
+- The routers are registered in `main.py` as `app.include_router(projects.router, prefix="/api", tags=["projects"])` — note the `/api` prefix plus full paths inside the module (`/projects`, `/tasks/{task_id}`), unlike the other routers which pass a resource-specific prefix.
+- Frontend: pages `ProjectsPage.tsx` (grid) and `ProjectDetailPage.tsx` (tabs), components under `frontend/src/components/projects/`, types in `types/project.ts`, API client in `api/projects.ts`. The API client gained `patch` and a multipart `upload` helper. The Kanban uses **native HTML5 drag & drop** (no DnD library). The sidebar item is `Projetos` and the page jump shortcut is now `1–7`.
 
 ## Database
 
 - SQLite async (SQLAlchemy) — file is `odin.db` at the repo root.
 - On every startup, `init_db()` creates tables if they don't exist (`backend/app/database/session.py`).
-- Tables: `conversations`, `messages`, `permission_requests`.
+- Tables: `conversations`, `messages`, `permission_requests`, `projects`, `tasks`.
 - Use `get_db_session()` (context manager) or `get_db()` (FastAPI dependency) for DB access.
 - Permission requests are the mechanism that blocks/unblocks filesystem/shell operations outside the workspace.
 
