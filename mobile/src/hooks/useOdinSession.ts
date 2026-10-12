@@ -16,7 +16,7 @@ export interface ToolExecutionData {
 
 /** Unified timeline entries: persisted messages, tool runs and permission intercepts. */
 export type TimelineEntry =
-  | { kind: 'message'; id: string; message: Message }
+  | { kind: 'message'; id: string; message: Message; streaming?: boolean }
   | { kind: 'tool'; id: string; execution: ToolExecutionData }
   | { kind: 'permission'; id: string; event: PermissionRequestEvent; resolved?: boolean };
 
@@ -113,6 +113,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
                 next[idx] = {
                   ...entry,
                   message: { ...entry.message, content },
+                  streaming: true,
                 };
                 return next;
               }
@@ -128,7 +129,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
               tool_call_id: null,
               created_at: new Date().toISOString(),
             };
-            return [...prev, { kind: 'message', id, message: msg }];
+            return [...prev, { kind: 'message', id, message: msg, streaming: true }];
           });
           break;
         }
@@ -199,6 +200,15 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
           setStatusMessage(null);
           streamBufferRef.current = '';
           streamEntryIdRef.current = null;
+          // Keep the in-memory timeline (tool/permission cards are not
+          // persisted), but clear the streaming flag so code/diagrams finish.
+          setTimeline((prev) =>
+            prev.some((e) => e.kind === 'message' && e.streaming)
+              ? prev.map((e) =>
+                  e.kind === 'message' && e.streaming ? { ...e, streaming: false } : e
+                )
+              : prev
+          );
           break;
         }
 
@@ -207,6 +217,13 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
           setStreamError(event.message);
           streamBufferRef.current = '';
           streamEntryIdRef.current = null;
+          setTimeline((prev) =>
+            prev.some((e) => e.kind === 'message' && e.streaming)
+              ? prev.map((e) =>
+                  e.kind === 'message' && e.streaming ? { ...e, streaming: false } : e
+                )
+              : prev
+          );
           break;
         }
 

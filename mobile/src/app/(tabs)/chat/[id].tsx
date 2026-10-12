@@ -156,7 +156,7 @@ export default function ConversationScreen() {
 
           {session.timeline.map((entry) => {
             if (entry.kind === 'message') {
-              return <MessageBubble key={entry.id} message={entry.message} />;
+              return <MessageBubble key={entry.id} message={entry.message} streaming={entry.streaming} />;
             }
             if (entry.kind === 'tool') {
               return <ToolCallCard key={entry.id} execution={entry.execution} />;
