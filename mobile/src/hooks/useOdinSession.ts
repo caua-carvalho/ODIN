@@ -225,6 +225,13 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
   const sendMessage = useCallback(
     (content: string) => {
       if (!conversationId || !content.trim()) return;
+      if (!isConnected) {
+        // Never silently drop a message: tell the user the pipe is down.
+        setStreamError(
+          'Sem conexão com o servidor (WebSocket desconectado). Aguarde a reconexão e tente novamente.'
+        );
+        return;
+      }
       setStreamError(null);
 
       const userMsg: Message = {
@@ -244,7 +251,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
       setStatusMessage('Thinking...');
       wsSend(content.trim());
     },
-    [conversationId, wsSend]
+    [conversationId, wsSend, isConnected]
   );
 
   return {

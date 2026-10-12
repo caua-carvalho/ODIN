@@ -23,7 +23,7 @@ export default function PermissionsScreen() {
       filter === 'pending'
         ? permissionsApi.listPendingPermissions()
         : permissionsApi.listPermissions(),
-    refetchInterval: filter === 'pending' ? 5000 : 30_000,
+    refetchInterval: filter === 'pending' ? 10_000 : 30_000,
   });
 
   const invalidate = () => {
@@ -49,6 +49,7 @@ export default function PermissionsScreen() {
     <Screen
       title="Permissões"
       subtitle="Aprovações de segurança para operações do agente"
+      scroll={false}
       right={
         <StatusBadge
           status={(permissions.data ?? []).some((p) => p.status === 'pending') ? 'warn' : 'ok'}
@@ -80,7 +81,7 @@ export default function PermissionsScreen() {
           data={permissions.data}
           keyExtractor={(p) => p.id}
           className="flex-1"
-          contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
+          contentContainerStyle={{ gap: 8, paddingBottom: 96 }}
           refreshControl={
             <RefreshControl
               refreshing={permissions.isRefetching}
@@ -88,7 +89,6 @@ export default function PermissionsScreen() {
               tintColor="#FF7A00"
             />
           }
-          ItemSeparatorComponent={() => <View className="h-0.5" />}
           renderItem={({ item }) => {
             let args: unknown = null;
             try {

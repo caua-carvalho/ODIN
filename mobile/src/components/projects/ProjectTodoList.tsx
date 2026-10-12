@@ -1,7 +1,16 @@
 import { useState } from 'react';
 import { View, Text, FlatList, Pressable, RefreshControl } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, CheckCircle2, Circle, Loader2 } from 'lucide-react-native';
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  ChevronUp,
+  ChevronDown,
+} from 'lucide-react-native';
 
 import { projectsApi } from '../../api/projects';
 import { Button } from '../ui/Button';
@@ -9,15 +18,21 @@ import { EmptyState } from '../ui/EmptyState';
 import { Segmented } from '../ui/Segmented';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TaskFormDialog } from './TaskFormDialog';
-import { PRIORITY_LABELS, STATUS_LABELS, type Task, type TaskStatus } from '../../types/project';
+import {
+  PRIORITY_LABELS,
+  STATUS_LABELS,
+  type Task,
+  type TaskReorderItem,
+  type TaskStatus,
+} from '../../types/project';
 import { cn } from '../../lib/utils';
 
 const STATUS_CYCLE: TaskStatus[] = ['todo', 'doing', 'done'];
 
-const STATUS_ICONS: Record<TaskStatus, { icon: typeof Circle; color: string }> = {
-  todo: { icon: Circle, color: '#6E6E73' },
-  doing: { icon: Loader2, color: '#00D9FF' },
-  done: { icon: CheckCircle2, color: '#34d399' },
+const STATUS_ICONS: Record<TaskStatus, { icon: typeof Circle; color: string; label: string }> = {
+  todo: { icon: Circle, color: '#6E6E73', label: 'A fazer' },
+  doing: { icon: Loader2, color: '#00D9FF', label: 'Em andamento' },
+  done: { icon: CheckCircle2, color: '#34d399', label: 'Concluído' },
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -40,14 +55,19 @@ export function ProjectTodoList({ projectId, tasks, loading, error, onChanged }:
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
+    onChanged();
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: Parameters<typeof projectsApi.createTask>[1]) =>
       projectsApi.createTask(projectId, data),
     onSuccess: () => {
       setFormOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
-      onChanged();
+      invalidate();
     },
   });
 
@@ -56,8 +76,7 @@ export function ProjectTodoList({ projectId, tasks, loading, error, onChanged }:
       projectsApi.updateTask(id, data),
     onSuccess: () => {
       setFormOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
-      onChanged();
+      invalidate();
     },
   });
 
@@ -65,10 +84,38 @@ export function ProjectTodoList({ projectId, tasks, loading, error, onChanged }:
     mutationFn: (id: string) => projectsApi.deleteTask(id),
     onSuccess: () => {
       setDeleteTarget(null);
-      void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
-      onChanged();
+      invalidate();
     },
   });
+
+  const reorderMutation = useMutation({
+    mutationFn: (items: TaskReorderItem[]) => projectsApi.reorderTasks(projectId, items),
+    onSuccess: invalidate,
+  });
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    onChanged();
+    setTimeout(() => setRefreshing(false), 800);
+  };
+
+  /**
+   * Move a task up/down within its status group (the same group that is
+   * visible in the Kanban column). Positions are re-densified for the group.
+   */
+  const moveTask = (task: Task, dir: -1 | 1) => {
+    const group = tasks
+      .filter((t) => t.status === task.status)
+      .sort((a, b) => a.position - b.position);
+    const idx = group.findIndex((t) => t.id === task.id);
+    const targetIdx = idx + dir;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= group.length) return;
+    const next = [...group];
+    [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+    reorderMutation.mutate(
+      next.map((t, i) => ({ id: t.id, status: t.status, position: i }))
+    );
+  };
 
   const cycleStatus = (task: Task) => {
     const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(task.status) + 1) % STATUS_CYCLE.length];
@@ -135,22 +182,29 @@ export function ProjectTodoList({ projectId, tasks, loading, error, onChanged }:
           data={filtered}
           keyExtractor={(t) => t.id}
           className="flex-1"
-          contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
+          contentContainerStyle={{ gap: 8 }}
           refreshControl={
-            <RefreshControl refreshing={false} onRefresh={onChanged} tintColor="#FF7A00" />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FF7A00" />
           }
-          ItemSeparatorComponent={() => <View className="h-0.5" />}
           renderItem={({ item }) => {
-            const StatusIcon = STATUS_ICONS[item.status].icon;
-            const statusLabel = STATUS_LABELS[item.status];
+            const statusMeta = STATUS_ICONS[item.status];
+            const StatusIcon = statusMeta.icon;
             return (
               <Pressable
-                onPress={() => cycleStatus(item)}
-                onLongPress={() => openEdit(item)}
+                onPress={() => openEdit(item)}
                 className="bg-surface-base border border-line rounded-xl px-3.5 py-3 gap-1.5 active:bg-surface-container"
+                accessibilityLabel={`Editar tarefa ${item.title}`}
               >
                 <View className="flex-row items-start gap-2.5">
-                  <StatusIcon size={18} color={STATUS_ICONS[item.status].color} style={{ marginTop: 1 }} />
+                  <Pressable
+                    onPress={() => cycleStatus(item)}
+                    hitSlop={10}
+                    className="pt-0.5 pr-1"
+                    accessibilityLabel={`Alterar status da tarefa ${item.title} (atualmente ${statusMeta.label})`}
+                    accessibilityRole="button"
+                  >
+                    <StatusIcon size={18} color={statusMeta.color} style={{ marginTop: 1 }} />
+                  </Pressable>
                   <View className="flex-1 gap-0.5">
                     <Text
                       className={cn(
@@ -161,7 +215,7 @@ export function ProjectTodoList({ projectId, tasks, loading, error, onChanged }:
                       {item.title}
                     </Text>
                     <View className="flex-row items-center gap-2">
-                      <Text className="font-mono text-[10px] text-muted uppercase">{statusLabel}</Text>
+                      <Text className="font-mono text-[10px] text-muted uppercase">{statusMeta.label}</Text>
                       <Text
                         className="font-mono text-[10px]"
                         style={{ color: PRIORITY_COLORS[item.priority] }}
@@ -175,11 +229,43 @@ export function ProjectTodoList({ projectId, tasks, loading, error, onChanged }:
                       </Text>
                     ) : null}
                   </View>
-                  <View className="flex-row gap-3 pt-0.5">
-                    <Pressable onPress={() => openEdit(item)} hitSlop={8} className="p-1">
+                  <View className="flex-row items-center gap-0.5 pt-0.5">
+                    <View className="gap-0.5">
+                      <Pressable
+                        onPress={() => moveTask(item, -1)}
+                        hitSlop={8}
+                        className="p-0.5"
+                        disabled={reorderMutation.isPending}
+                        accessibilityLabel={`Mover ${item.title} para cima`}
+                        accessibilityRole="button"
+                      >
+                        <ChevronUp size={14} color="#6E6E73" />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => moveTask(item, 1)}
+                        hitSlop={8}
+                        className="p-0.5"
+                        disabled={reorderMutation.isPending}
+                        accessibilityLabel={`Mover ${item.title} para baixo`}
+                        accessibilityRole="button"
+                      >
+                        <ChevronDown size={14} color="#6E6E73" />
+                      </Pressable>
+                    </View>
+                    <Pressable
+                      onPress={() => openEdit(item)}
+                      hitSlop={8}
+                      className="p-1"
+                      accessibilityLabel={`Editar tarefa ${item.title}`}
+                    >
                       <Pencil size={14} color="#6E6E73" />
                     </Pressable>
-                    <Pressable onPress={() => setDeleteTarget(item)} hitSlop={8} className="p-1">
+                    <Pressable
+                      onPress={() => setDeleteTarget(item)}
+                      hitSlop={8}
+                      className="p-1"
+                      accessibilityLabel={`Excluir tarefa ${item.title}`}
+                    >
                       <Trash2 size={14} color="#6E6E73" />
                     </Pressable>
                   </View>

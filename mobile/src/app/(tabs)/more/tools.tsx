@@ -31,8 +31,14 @@ export default function ToolsScreen() {
     <Screen
       title="Tools"
       subtitle={`${tools.data?.length ?? 0} ferramentas registradas`}
+      scroll={false}
       right={
-        <Pressable onPress={() => router.back()} hitSlop={10} className="p-1">
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={10}
+          className="p-1"
+          accessibilityLabel="Voltar"
+        >
           <ArrowLeft size={20} color="#A1A1A6" />
         </Pressable>
       }
@@ -46,7 +52,7 @@ export default function ToolsScreen() {
           data={grouped}
           keyExtractor={([category]) => category}
           className="flex-1"
-          contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
+          contentContainerStyle={{ gap: 12, paddingBottom: 96 }}
           renderItem={({ item: [category, list] }) => (
             <View className="gap-2">
               <Text className="px-1 text-xs font-semibold text-muted uppercase tracking-wider">

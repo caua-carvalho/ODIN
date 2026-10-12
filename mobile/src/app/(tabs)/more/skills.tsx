@@ -17,8 +17,14 @@ export default function SkillsScreen() {
     <Screen
       title="Skills"
       subtitle={`${skills.data?.length ?? 0} habilidades disponíveis`}
+      scroll={false}
       right={
-        <Pressable onPress={() => router.back()} hitSlop={10} className="p-1">
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={10}
+          className="p-1"
+          accessibilityLabel="Voltar"
+        >
           <ArrowLeft size={20} color="#A1A1A6" />
         </Pressable>
       }
@@ -34,8 +40,7 @@ export default function SkillsScreen() {
           data={skills.data}
           keyExtractor={(s) => s.name}
           className="flex-1"
-          contentContainerStyle={{ gap: 10, paddingBottom: 16 }}
-          ItemSeparatorComponent={() => <View className="h-0.5" />}
+          contentContainerStyle={{ gap: 10, paddingBottom: 96 }}
           renderItem={({ item }) => (
             <View className="bg-surface-base border border-line rounded-xl px-3.5 py-3 gap-2">
               <View className="flex-row items-start gap-2.5">

@@ -9,10 +9,12 @@ import {
   Pressable,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, RefreshCw, SendHorizonal, Loader2, AlertTriangle } from 'lucide-react-native';
 
 import { useOdinSession } from '../../../hooks/useOdinSession';
+import { conversationsApi } from '../../../api/conversations';
 import { MessageBubble } from '../../../components/chat/MessageBubble';
 import { ToolCallCard } from '../../../components/chat/ToolCallCard';
 import { PermissionInline } from '../../../components/chat/PermissionInline';
@@ -31,6 +33,14 @@ export default function ConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const conversationId = typeof id === 'string' ? id : null;
+
+  // Real conversation title (falls back to a generic label while loading).
+  const conversation = useQuery({
+    queryKey: ['conversation', conversationId],
+    queryFn: () => conversationsApi.getConversation(conversationId as string),
+    enabled: !!conversationId,
+    staleTime: 30_000,
+  });
 
   const [input, setInput] = useState('');
   const scrollRef = useRef<ScrollView>(null);
@@ -69,12 +79,12 @@ export default function ConversationScreen() {
       >
         {/* Header */}
         <View className="px-4 py-2.5 flex-row items-center gap-3 border-b border-line bg-surface-base">
-          <Pressable onPress={() => router.back()} hitSlop={10} className="p-1">
+          <Pressable onPress={() => router.back()} hitSlop={10} className="p-1" accessibilityLabel="Voltar">
             <ArrowLeft size={20} color="#A1A1A6" />
           </Pressable>
           <View className="flex-1 min-w-0">
             <Text className="text-sm font-medium text-primary" numberOfLines={1}>
-              {conversationId ? `session ${conversationId.slice(0, 8)}` : 'Sem conversa'}
+              {conversation.data?.title || 'Nova conversa'}
             </Text>
             <View className="flex-row items-center gap-2 mt-0.5">
               <StatusBadge status={session.wsConnected ? 'ok' : 'err'} label={session.wsConnected ? 'WS' : 'offline'} />
@@ -83,7 +93,7 @@ export default function ConversationScreen() {
               ) : null}
             </View>
           </View>
-          <Button size="sm" variant="ghost" onPress={() => session.reloadHistory()}>
+          <Button size="sm" variant="ghost" accessibilityLabel="Recarregar mensagens" onPress={() => session.reloadHistory()}>
             <RefreshCw size={16} color="#6E6E73" />
           </Button>
         </View>
@@ -157,7 +167,13 @@ export default function ConversationScreen() {
             <Text className="text-accent font-mono text-sm pb-1">›</Text>
             <TextInput
               className="flex-1 text-sm text-primary font-mono min-h-[36px] max-h-[120px] py-0"
-              placeholder={busy ? 'ODIN trabalhando…' : 'Mensagem para o ODIN…'}
+              placeholder={
+                busy
+                  ? 'ODIN trabalhando…'
+                  : !session.wsConnected
+                    ? 'Reconectando…'
+                    : 'Mensagem para o ODIN…'
+              }
               placeholderTextColor="#6E6E73"
               multiline
               value={input}
@@ -169,14 +185,17 @@ export default function ConversationScreen() {
             <Button
               size="sm"
               variant="primary"
-              disabled={!input.trim() || busy}
+              accessibilityLabel="Enviar mensagem"
+              disabled={!input.trim() || busy || !session.wsConnected}
               onPress={handleSend}
             >
               <SendHorizonal size={16} color="#050505" />
             </Button>
           </View>
           {!session.wsConnected && conversationId ? (
-            <Text className="text-[11px] text-err mt-1 font-mono">WebSocket desconectado</Text>
+            <Text className="text-[11px] text-err mt-1 font-mono">
+              WebSocket desconectado — aguardando reconexão automática
+            </Text>
           ) : null}
         </View>
       </KeyboardAvoidingView>

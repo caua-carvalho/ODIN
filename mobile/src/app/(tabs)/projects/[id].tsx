@@ -96,7 +96,7 @@ export default function ProjectDetailScreen() {
     <SafeAreaView edges={['top']} className="flex-1 bg-surface-canvas">
       {/* Header */}
       <View className="px-4 py-2.5 flex-row items-center gap-3 border-b border-line bg-surface-base">
-        <Pressable onPress={() => router.back()} hitSlop={10} className="p-1">
+        <Pressable onPress={() => router.back()} hitSlop={10} className="p-1" accessibilityLabel="Voltar">
           <ArrowLeft size={20} color="#A1A1A6" />
         </Pressable>
         <View className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
@@ -108,10 +108,20 @@ export default function ProjectDetailScreen() {
             {p.task_count} tarefas · atualizado {formatRelativeTime(p.updated_at)}
           </Text>
         </View>
-        <Pressable onPress={() => setEditOpen(true)} hitSlop={10} className="p-2">
+        <Pressable
+          onPress={() => setEditOpen(true)}
+          hitSlop={10}
+          className="p-2"
+          accessibilityLabel={`Editar projeto ${p.name}`}
+        >
           <Pencil size={16} color="#6E6E73" />
         </Pressable>
-        <Pressable onPress={() => setDeleteOpen(true)} hitSlop={10} className="p-2">
+        <Pressable
+          onPress={() => setDeleteOpen(true)}
+          hitSlop={10}
+          className="p-2"
+          accessibilityLabel={`Excluir projeto ${p.name}`}
+        >
           <Trash2 size={16} color="#6E6E73" />
         </Pressable>
       </View>

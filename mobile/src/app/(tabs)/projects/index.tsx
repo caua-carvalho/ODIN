@@ -103,10 +103,20 @@ export default function ProjectsScreen() {
             <ProgressBar percent={progress} />
           </View>
           <View className="flex-row gap-3 pt-0.5">
-            <Pressable onPress={() => openEdit(item)} hitSlop={8} className="p-1">
+            <Pressable
+              onPress={() => openEdit(item)}
+              hitSlop={10}
+              className="p-1"
+              accessibilityLabel={`Editar projeto ${item.name}`}
+            >
               <Pencil size={14} color="#6E6E73" />
             </Pressable>
-            <Pressable onPress={() => setDeleteTarget(item)} hitSlop={8} className="p-1">
+            <Pressable
+              onPress={() => setDeleteTarget(item)}
+              hitSlop={10}
+              className="p-1"
+              accessibilityLabel={`Excluir projeto ${item.name}`}
+            >
               <Trash2 size={14} color="#6E6E73" />
             </Pressable>
           </View>
@@ -119,8 +129,14 @@ export default function ProjectsScreen() {
     <Screen
       title="Projetos"
       subtitle="TODO, Kanban e workspace de arquivos"
+      scroll={false}
       right={
-        <Button size="sm" variant="subtle-accent" onPress={openCreate}>
+        <Button
+          size="sm"
+          variant="subtle-accent"
+          accessibilityLabel="Criar projeto"
+          onPress={openCreate}
+        >
           <Plus size={16} color="#FF7A00" />
         </Button>
       }
@@ -141,7 +157,7 @@ export default function ProjectsScreen() {
           keyExtractor={(p) => p.id}
           numColumns={2}
           className="flex-1"
-          contentContainerStyle={{ paddingBottom: 16, paddingHorizontal: 4 }}
+          contentContainerStyle={{ paddingBottom: 96, paddingHorizontal: 4 }}
           refreshControl={
             <RefreshControl
               refreshing={projects.isRefetching}
