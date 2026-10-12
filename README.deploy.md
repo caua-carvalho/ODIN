@@ -42,6 +42,41 @@ Dá acesso imediato pelo celular e pelo painel web, com URL temporária.
 
 ---
 
+## Acesso permanente SEM domínio (Tailscale Funnel)
+
+Se você não tem domínio, o **Tailscale Funnel** dá uma URL pública **fixa e
+grátis** (`https://<hostname>.<tailnet>.ts.net`), com HTTPS automático, sem
+abrir porta nenhuma. Roda em modo *userspace* (não precisa de sudo/TUN) como
+serviço `systemd --user` e, com `Linger=yes`, sobrevive a logout/reboot.
+
+```bash
+./scripts/tailscale-funnel-setup.sh          # ou: ./scripts/tailscale-funnel-setup.sh 8000
+```
+
+O script instala os binários do Tailscale em `~/.local/opt/tailscale`, cria o
+unit `~/.config/systemd/user/tailscaled.service`, habilita-o e sobe o Funnel
+para `127.0.0.1:<porta>`. Duas aprovações no navegador são pedidas na primeira
+vez:
+
+1. **Login do dispositivo** — o `tailscale up` imprime uma URL
+   (`https://login.tailscale.com/a/...`); autorize a máquina na sua tailnet.
+2. **Habilitar Funnel** — `https://login.tailscale.com/f/funnel?node=...`
+   (beta, desabilitado por padrão; o fluxo também provisiona os certificados
+   HTTPS e o MagicDNS).
+
+Resultado: `https://odin.<sua-tailnet>.ts.net` → `http://127.0.0.1:<porta>`.
+Use o mesmo `ODIN_API_TOKEN` como segunda camada de proteção.
+
+```bash
+~/.local/bin/tailscale serve status            # ver o Funnel ativo
+~/.local/bin/tailscale funnel --https=443 off  # desligar
+```
+
+> O `README` principal de deploy usa o **Cloudflare Tunnel**; o Tailscale é a
+> alternativa sem domínio. Ambos mantêm o backend em loopback.
+
+---
+
 ## Túnel nomeado + domínio + Cloudflare Access (URL fixa e com login)
 
 Pré-requisitos: domínio com os nameservers no Cloudflare (plano Free) e conta

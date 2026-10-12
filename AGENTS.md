@@ -21,6 +21,7 @@ Lines that are generic or obvious are omitted.
 | `./scripts/build.sh` | Install backend deps + build the frontend (`frontend/dist`) in one shot |
 | `./scripts/install-service.sh` | Install the **system** systemd unit (`deploy/odin.service`, `Restart=always`); needs sudo — for hosting |
 | `./scripts/cloudflared-quick-tunnel.sh` | Fastest public URL: launches a Cloudflare quick tunnel to `127.0.0.1:8000` |
+| `./scripts/tailscale-funnel-setup.sh` | Permanent public URL **without a domain**: Tailscale Funnel (`*.ts.net`), userspace, no sudo |
 | `./scripts/backup.sh [dest]` | Back up `odin.db` + workspace (default `~/.local/state/odin/backups`) |
 
 > **Note**: `setup.sh` no longer references a non-existent `scripts/dev.sh`; it now points at `./scripts/build.sh` and `./scripts/odin.sh start`. For a dev server, run `uvicorn app.main:app --host 127.0.0.1 --port 8000` from the backend dir, and separately `npm run dev` from the frontend dir.
@@ -74,6 +75,12 @@ walkthrough in **`README.deploy.md`**. Pieces:
 - `scripts/cloudflared-quick-tunnel.sh` — immediate `*.trycloudflare.com` URL
   (rotating, no Access); named tunnel + domain + Cloudflare Access is documented
   in the README.
+- `scripts/tailscale-funnel-setup.sh` — **zero-domain** permanent option:
+  runs `tailscaled` in userspace mode as a `systemd --user` service (no sudo)
+  and exposes `127.0.0.1:<port>` at `https://<host>.<tailnet>.ts.net` via
+  Tailscale Funnel. Interactive browser steps: device login + enable Funnel.
+  `Linger=yes` keeps it alive across logout/reboot. This is what this machine
+  uses in practice (tailnet `tail5426dc.ts.net`, host `odin`).
 
 ## LLM providers
 
