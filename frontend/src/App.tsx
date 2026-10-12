@@ -6,6 +6,8 @@ import { ToolsPage } from './pages/ToolsPage';
 import { SkillsPage } from './pages/SkillsPage';
 import { PermissionsPage } from './pages/PermissionsPage';
 import { SystemPage } from './pages/SystemPage';
+import { ProjectsPage } from './pages/ProjectsPage';
+import { ProjectDetailPage } from './pages/ProjectDetailPage';
 
 function App() {
   return (
@@ -14,6 +16,8 @@ function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
