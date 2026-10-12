@@ -9,6 +9,7 @@
 .env.*
 !.env.example
 !.env.template
+!.env.production.example
 
 # ------------------------------------------
 # Node.js / React / Vite

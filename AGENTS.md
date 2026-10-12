@@ -18,9 +18,12 @@ Lines that are generic or obvious are omitted.
 | `./scripts/setup.sh` | Full setup: create venv, install deps, npm install, create .env |
 | `./scripts/install-autostart.sh` | Install autostart: systemd `--user` unit (starts at boot) + desktop entry (opens the panel on login) |
 | `./scripts/open-panel.sh` | Wait for the backend, then open the web panel in the browser (used by the desktop autostart entry) |
-| `./scripts/dev.sh` *(not yet created but referenced)* | Development workflow — see note below |
+| `./scripts/build.sh` | Install backend deps + build the frontend (`frontend/dist`) in one shot |
+| `./scripts/install-service.sh` | Install the **system** systemd unit (`deploy/odin.service`, `Restart=always`); needs sudo — for hosting |
+| `./scripts/cloudflared-quick-tunnel.sh` | Fastest public URL: launches a Cloudflare quick tunnel to `127.0.0.1:8000` |
+| `./scripts/backup.sh [dest]` | Back up `odin.db` + workspace (default `~/.local/state/odin/backups`) |
 
-> **Note**: The `setup.sh` script references `./scripts/dev.sh` at the end, but that file does not exist in this repo. If you need a dev server, run `uvicorn app.main:app --host 127.0.0.1 --port 8000` from the backend dir, and separately `npm run dev` from the frontend dir.
+> **Note**: `setup.sh` no longer references a non-existent `scripts/dev.sh`; it now points at `./scripts/build.sh` and `./scripts/odin.sh start`. For a dev server, run `uvicorn app.main:app --host 127.0.0.1 --port 8000` from the backend dir, and separately `npm run dev` from the frontend dir.
 
 > **CLI internals**: The `start|stop|restart|status|logs|help` subcommands are implemented in `scripts/odin.sh` (a shell wrapper), **not** in `app/cli/main.py`. The interactive chat (no args) is `app/cli/main.py` and supports in-session slash commands `/help`, `/clear`, `/model`, `/models` (via `app/cli/commands.py`).
 
@@ -57,6 +60,21 @@ changing frontend code you must rebuild it (`cd frontend && npm run build`) for
 the served panel to reflect the change. If `frontend/dist` is missing, the
 backend logs a warning and serves only the API.
 
+## Hosting / deploy
+
+The intended hosting topology is **backend on `127.0.0.1:8000` + Cloudflare
+Tunnel** (`cloudflared`, outbound-only — no inbound port, automatic TLS). Full
+walkthrough in **`README.deploy.md`**. Pieces:
+
+- `deploy/odin.service` — system systemd unit template (rendered by
+  `scripts/install-service.sh`); this is the *hosting* unit, distinct from the
+  desktop `--user` unit installed by `install-autostart.sh`.
+- `.env.production.example` — production env template (loopback bind, token,
+  public `ODIN_CORS_ORIGINS`).
+- `scripts/cloudflared-quick-tunnel.sh` — immediate `*.trycloudflare.com` URL
+  (rotating, no Access); named tunnel + domain + Cloudflare Access is documented
+  in the README.
+
 ## LLM providers
 
 The backend supports **three** LLM providers, registered in `backend/app/agent/providers/factory.py` under `PROVIDER_BUILDERS` and described in `backend/app/agent/providers/catalog.py` (`PROVIDERS`):
@@ -90,8 +108,11 @@ Key concepts:
 - **SecurityPolicy** (`backend/app/security/policy.py`): Classifies operations (READ/WRITE/DELETE/MOVE/EXECUTE) and returns `AccessLevel` (`ALLOW` / `REQUIRE_APPROVAL` / `DENY`).
 - **Workspace boundary**: Operations *inside* `ODIN_WORKSPACE` are always allowed. Outside → READ is denied; WRITE/DELETE/MOVE/EXECUTE require approval.
 - **Privileged commands**: `sudo`, `apt`, `systemctl`, `fdisk`, `mkfs`, etc. always require approval.
-- **Safe dev executables**: `git`, `python`, `node`, `npm`, `pytest`, etc. are allowed without approval when inside the workspace.
+- **Destructive / remote / network commands always require approval** (regardless of workspace): `rm`, `rmdir`, `chmod`, `chown`, `chgrp`, `truncate` (`DESTRUCTIVE_EXECUTABLES`), `ssh`, `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet` (`REMOTE_EXECUTABLES`) and `curl`, `wget` (`NETWORK_EXECUTABLES`). This was tightened for hosting; to restore the old permissive behavior, move them back into `SAFE_DEV_EXECUTABLES`.
+- **Safe dev executables**: `git`, `python`, `node`, `npm`, `pytest`, `cp`, `mv`, `mkdir`, etc. are allowed without approval when inside the workspace.
 - **Permission system**: WRITE/DELETE/MOVE/EXECUTE outside the workspace trigger a permission request (stored in DB, bridged via WebSocket). The agent will yield `permission_request` events that the UI must approve before the operation proceeds.
+- **Exposure guard** (`_enforce_exposure_guard` in `main.py` lifespan): the backend **refuses to start** if `ODIN_HOST` is not loopback and `ODIN_API_TOKEN` is empty. A public bind without a token is treated as RCE-by-design.
+- **Auth rate limit** (`_FailureLimiter` in `security/auth.py`): wrong tokens are counted per client (`CF-Connecting-IP` / `X-Forwarded-For`, else socket peer) and answer `429` after `ODIN_AUTH_MAX_FAILURES` within `ODIN_AUTH_WINDOW_SECONDS`; a correct token resets the counter.
 
 > **Important**: If an agent seems to "ignore" a tool call, it may have been denied by the security policy. Check the logs for `Access denied` or `REQUIRE_APPROVAL` messages.
 
@@ -198,10 +219,11 @@ Key facts:
 
 ## Authentication (optional, for LAN / mobile)
 
-- `ODIN_API_TOKEN` (empty by default = **disabled**, so current behavior is unchanged) adds a bearer-token gate to the API. When set, every `/api/*` request must send `Authorization: Bearer <token>`; `/api/health` is exempt (clients probe it to test connectivity). WebSocket clients that cannot set headers pass `?token=<token>` on `/api/ws/{id}` instead.
-- Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, constant-time compare). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
+- `ODIN_API_TOKEN` (empty by default = **disabled**) adds a bearer-token gate to the API. When set, every `/api/*` request must send `Authorization: Bearer <token>`; `/api/health` is exempt (clients probe it to test connectivity). WebSocket clients that cannot set headers pass `?token=<token>` on `/api/ws/{id}` instead.
+- **The exposure guard makes the token effectively mandatory for any non-loopback bind**: `main.py` refuses to start if `ODIN_HOST` is not loopback and the token is empty. So for a LAN bind (`ODIN_HOST=0.0.0.0`) or a public host you *must* set `ODIN_API_TOKEN`. For the recommended hosting setup the backend stays on `127.0.0.1` and the token is still set as defense in depth (see `README.deploy.md`).
+- Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, constant-time compare, plus a `_FailureLimiter` that returns `429` after repeated wrong tokens). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
 - Clients: the mobile app stores the token in its Connect/Settings screen; the web panel reads `localStorage['odin_api_token']` (set it in the browser console).
-- Reaching the backend from a phone requires `ODIN_HOST=0.0.0.0` (the default `127.0.0.1` binds loopback only) — pair it with a token.
+- Reaching the backend from a phone on the LAN requires `ODIN_HOST=0.0.0.0` — pair it with a token (or, preferably, use a Cloudflare tunnel and keep it loopback).
 - `scripts/server.sh` (used by `odin start/restart`) reads `ODIN_HOST`/`ODIN_PORT` **from the repo `.env`** (falling back to an exported shell var, then `127.0.0.1:8000`). So setting `ODIN_HOST=0.0.0.0` in `.env` and running `odin restart` is enough — no manual `export` needed.
 - **CORS is only a browser concern** (Vite web panel, Expo **web**). Native Expo Go does not enforce it; its failure mode is `java.net.ConnectException ... 127.0.0.1:8000`, which means the app is still pointing at `127.0.0.1` instead of the machine's LAN IP (`hostname -I`). Set the app's server URL to `http://<lan-ip>:8000`. The allowed origins/regex live in `settings.odin_cors_origins` / `odin_cors_origin_regex` (`main.py`); the defaults include `:3000` (Vite) and `:8081` (Expo web) plus any private-LAN origin.
 

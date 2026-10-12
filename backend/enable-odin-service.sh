@@ -1,33 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# DEPRECATED. This script used to write a systemd unit that called a
+# non-existent `/usr/bin/odin serve` binary, so it never worked.
+#
+# Installing Odin as a service is now handled by scripts/install-service.sh,
+# which renders deploy/odin.service with the correct paths. See
+# README.deploy.md.
+#
+# This shim forwards to it so existing muscle memory keeps working.
 
-# Create systemd service unit content
-cat <<EOF > /tmp/odin-serve.service
-[Unit]
-Description=Odin Serve Service
-After=network.target
+set -euo pipefail
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/odin serve
-Restart=on-failure
-User=$(whoami)
-Environment=HOME=/home/$(whoami)
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Move the service file to systemd directory
-sudo mv /tmp/odin-serve.service /etc/systemd/system/odin-serve.service
-
-# Reload systemd daemon
-sudo systemctl daemon-reload
-
-# Enable the service to start at boot
-sudo systemctl enable odin-serve.service
-
-# Start the service immediately
-sudo systemctl start odin-serve.service
-
-# Check status
-systemctl status odin-serve.service
+echo "[odin] enable-odin-service.sh foi movido para scripts/install-service.sh" >&2
+exec "$ROOT_DIR/scripts/install-service.sh" "$@"
