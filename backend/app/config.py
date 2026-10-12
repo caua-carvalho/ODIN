@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # responses/tool calls with thinking enabled, so the default is false.
     ollama_think: bool = False
 
+    # Daily briefing
+    odin_weather_city: str = "São José dos Campos"
+    odin_weather_lat: float = -23.1794
+    odin_weather_lon: float = -45.8869
+    # Comma-separated list of repository paths to summarise in the briefing.
+    odin_briefing_repos: str = "/home/caua/odin,/home/caua/odin-workspace"
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./odin.db"
 
