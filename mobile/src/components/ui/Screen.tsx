@@ -1,4 +1,5 @@
-import { View, ScrollView, Text, type ViewProps } from 'react-native';
+import { View, Text, type ViewProps } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { cn } from '../../lib/utils';
 import type { ReactNode } from 'react';
@@ -34,14 +35,15 @@ export function Screen({
       ) : null}
       {subtitle ? <Text className="px-4 pb-2 text-sm text-secondary">{subtitle}</Text> : null}
       {scroll ? (
-        <ScrollView
+        <KeyboardAwareScrollView
           className="flex-1"
+          bottomOffset={16}
           contentContainerStyle={padded ? { padding: 16, paddingBottom: 96, gap: 12 } : { paddingBottom: 96, gap: 12 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {children}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       ) : (
         <View className="flex-1">{children}</View>
       )}

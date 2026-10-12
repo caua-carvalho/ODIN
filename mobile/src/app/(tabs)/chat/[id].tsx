@@ -1,16 +1,10 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TextInput,
-  Keyboard,
-  Platform,
-  Pressable,
-} from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { useKeyboardHandler } from 'react-native-keyboard-controller';
 import { ArrowLeft, RefreshCw, SendHorizonal, Loader2, AlertTriangle } from 'lucide-react-native';
 
 import { useOdinSession } from '../../../hooks/useOdinSession';
@@ -47,74 +41,31 @@ export default function ConversationScreen() {
   const stickToBottomRef = useRef(true);
 
   // --- Keyboard avoidance -------------------------------------------------
-  // On Android (edge-to-edge) the window no longer resizes with the keyboard,
-  // so KeyboardAvoidingView is unreliable — especially inside Expo Go, whose
-  // native resize behavior varies per device. Instead of estimating the
-  // keyboard height, we MEASURE the input's actual position on screen and pad
-  // by exactly the amount it overlaps the keyboard frame. Self-correcting in
-  // every mode (adjustResize, pan, gesture-nav insets).
-  const inputBoxRef = useRef<View>(null);
-  const kbTopRef = useRef(0);
-  const kbEstimateRef = useRef(0);
-  const reMeasureCountRef = useRef(0);
-  const reMeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Indirection so the re-measure loop can schedule itself without a
-  // self-reference inside the callback (flagged by react-hooks/immutability).
-  const reMeasureFnRef = useRef<() => void>(() => {});
-  const [inputPad, setInputPad] = useState(0);
+  // SDK 57 runs edge-to-edge: on Android the window no longer resizes with the
+  // keyboard, so the OS does not lift the input by itself. Instead of manually
+  // measuring heights (fragile across devices/modes), use the global, Expo-
+  // documented solution — react-native-keyboard-controller (bundled in Expo
+  // Go): a spacer at the column bottom that animates to EXACTLY the keyboard
+  // height, in sync with the keyboard, identically on Android and iOS.
+  const keyboardHeight = useSharedValue(0);
 
-  const reMeasureOverlap = useCallback(() => {
-    const box = inputBoxRef.current;
-    if (!box) return;
-    box.measureInWindow((_x, y, _w, h) => {
-      if (!h) {
-        // Measurement unavailable — fall back to the reported keyboard height.
-        setInputPad(kbEstimateRef.current);
-        return;
-      }
-      const pad = Math.max(0, y + h - kbTopRef.current + 8);
-      setInputPad(pad);
-      if (pad > 0 && reMeasureCountRef.current < 8) {
-        // Tab-bar hide / resize animations may still be settling: re-measure
-        // until the input clears the keyboard.
-        reMeasureCountRef.current += 1;
-        if (reMeasureTimerRef.current) clearTimeout(reMeasureTimerRef.current);
-        reMeasureTimerRef.current = setTimeout(() => reMeasureFnRef.current?.(), 120);
-      } else {
-        reMeasureCountRef.current = 0;
-      }
-    });
-  }, []);
+  useKeyboardHandler(
+    {
+      onMove: (e) => {
+        'worklet';
+        keyboardHeight.value = Math.max(e.height, 0);
+      },
+      onEnd: (e) => {
+        'worklet';
+        keyboardHeight.value = Math.max(e.height, 0);
+      },
+    },
+    []
+  );
 
-  // Keep the recursive-entry ref in sync with the current callback.
-  useEffect(() => {
-    reMeasureFnRef.current = reMeasureOverlap;
-  }, [reMeasureOverlap]);
-
-  useEffect(() => {
-    const show = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => {
-        kbTopRef.current = Math.round(e.endCoordinates.screenY);
-        kbEstimateRef.current = e.endCoordinates.height;
-        reMeasureCountRef.current = 0;
-        requestAnimationFrame(reMeasureOverlap);
-      }
-    );
-    const hide = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        if (reMeasureTimerRef.current) clearTimeout(reMeasureTimerRef.current);
-        reMeasureTimerRef.current = null;
-        setInputPad(0);
-      }
-    );
-    return () => {
-      show.remove();
-      hide.remove();
-      if (reMeasureTimerRef.current) clearTimeout(reMeasureTimerRef.current);
-    };
-  }, [reMeasureOverlap]);
+  const keyboardSpacer = useAnimatedStyle(() => ({
+    height: keyboardHeight.value,
+  }));
   // ------------------------------------------------------------------------
 
   const session = useOdinSession(conversationId);
@@ -229,14 +180,8 @@ export default function ConversationScreen() {
         </ScrollView>
 
         {/* Input */}
-        <View
-          className="border-t border-line bg-surface-base px-3 py-2.5"
-          style={{ paddingBottom: inputPad + 10 }}
-        >
-          <View
-            ref={inputBoxRef}
-            className="flex-row items-end gap-2 bg-surface-elevated border border-line rounded-xl px-3 py-2"
-          >
+        <View className="border-t border-line bg-surface-base px-3 py-2.5">
+          <View className="flex-row items-end gap-2 bg-surface-elevated border border-line rounded-xl px-3 py-2">
             <Text className="text-accent font-mono text-sm pb-1">›</Text>
             <TextInput
               className="flex-1 text-sm text-primary font-mono min-h-[36px] max-h-[120px] py-0"
@@ -271,6 +216,9 @@ export default function ConversationScreen() {
             </Text>
           ) : null}
         </View>
+
+        {/* Grows to the exact keyboard height so the input never sits under it. */}
+        <Animated.View style={keyboardSpacer} />
       </View>
     </SafeAreaView>
   );

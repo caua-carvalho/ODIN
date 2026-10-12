@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Text, View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import Constants from 'expo-constants';
 import { CheckCircle2, XCircle, Server } from 'lucide-react-native';
 
@@ -82,15 +83,12 @@ export default function ConnectScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-surface-canvas">
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
         className="flex-1"
+        bottomOffset={24}
+        contentContainerStyle={{ padding: 20, gap: 16, justifyContent: 'center', flexGrow: 1 }}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ padding: 20, gap: 16, justifyContent: 'center', flexGrow: 1 }}
-          keyboardShouldPersistTaps="handled"
-        >
           <View className="items-center gap-2 mb-2">
             <View className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/30 items-center justify-center">
               <Server size={28} color="#FF7A00" />
@@ -167,8 +165,7 @@ export default function ConnectScreen() {
               onPress={() => void handleConnect()}
             />
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }
