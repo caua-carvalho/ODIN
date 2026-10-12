@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./odin.db"
 
+    # Security
+    # Optional bearer token required for /api/* (empty = disabled). Enable it
+    # before exposing Odin to the LAN/internet (e.g. for the mobile app or a
+    # remote ODIN_HOST). The mobile client stores it in its settings screen.
+    odin_api_token: str = ""
+
     # Debug
     debug: bool = False
 

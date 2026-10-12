@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { OdinEvent, ClientMessage } from '../types/websocket';
+import { getApiToken } from '../api/client';
 
 interface UseOdinWebSocketOptions {
   conversationId: string | null;
@@ -76,7 +77,9 @@ export function useOdinWebSocket({
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = import.meta.env.VITE_WS_HOST || window.location.host;
-      const ws = new WebSocket(`${protocol}//${host}/api/ws/${conversationId}`);
+      const token = getApiToken();
+      const query = token ? `?token=${encodeURIComponent(token)}` : '';
+      const ws = new WebSocket(`${protocol}//${host}/api/ws/${conversationId}${query}`);
       wsRef.current = ws;
 
       ws.onopen = () => {

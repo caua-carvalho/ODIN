@@ -20,6 +20,7 @@ import {
   PanelLeft,
   Keyboard,
   Sparkles,
+  FolderKanban,
 } from 'lucide-react';
 import type { HealthResponse } from '../types/health';
 import type { BriefingResponse } from '../types/briefing';
@@ -27,20 +28,22 @@ import type { BriefingResponse } from '../types/briefing';
 const PAGE_ROUTES: Record<string, string> = {
   dashboard: '/',
   chat: '/chat',
+  projects: '/projects',
   tools: '/tools',
   skills: '/skills',
   permissions: '/permissions',
   system: '/system',
 };
 
-// 1–6 jump to a page, mirroring the sidebar order.
+// 1–7 jump to a page, mirroring the sidebar order.
 const PAGE_KEYS: Record<string, string> = {
   '1': 'dashboard',
   '2': 'chat',
-  '3': 'tools',
-  '4': 'skills',
-  '5': 'permissions',
-  '6': 'system',
+  '3': 'projects',
+  '4': 'tools',
+  '5': 'skills',
+  '6': 'permissions',
+  '7': 'system',
 };
 
 const isDesktop = () => window.innerWidth >= 1024;
@@ -70,6 +73,7 @@ export function AppLayout() {
   useEffect(() => {
     const path = location.pathname;
     if (path === '/chat') setActivePage('chat');
+    else if (path.startsWith('/projects')) setActivePage('projects');
     else if (path === '/tools') setActivePage('tools');
     else if (path === '/skills') setActivePage('skills');
     else if (path === '/permissions') setActivePage('permissions');
@@ -215,10 +219,11 @@ export function AppLayout() {
     () => [
       { id: 'nav-dashboard', label: 'Go to Dashboard', hint: '1', icon: LayoutDashboard, run: () => handleNavigate('dashboard') },
       { id: 'nav-chat', label: 'Go to Chat', hint: '2', icon: MessageSquare, run: () => handleNavigate('chat') },
-      { id: 'nav-tools', label: 'Go to Tools', hint: '3', icon: Wrench, run: () => handleNavigate('tools') },
-      { id: 'nav-skills', label: 'Go to Skills', hint: '4', icon: Settings, run: () => handleNavigate('skills') },
-      { id: 'nav-permissions', label: 'Go to Permissions', hint: '5', icon: Shield, run: () => handleNavigate('permissions') },
-      { id: 'nav-system', label: 'Go to System', hint: '6', icon: HardDrive, run: () => handleNavigate('system') },
+      { id: 'nav-projects', label: 'Go to Projects', hint: '3', icon: FolderKanban, run: () => handleNavigate('projects') },
+      { id: 'nav-tools', label: 'Go to Tools', hint: '4', icon: Wrench, run: () => handleNavigate('tools') },
+      { id: 'nav-skills', label: 'Go to Skills', hint: '5', icon: Settings, run: () => handleNavigate('skills') },
+      { id: 'nav-permissions', label: 'Go to Permissions', hint: '6', icon: Shield, run: () => handleNavigate('permissions') },
+      { id: 'nav-system', label: 'Go to System', hint: '7', icon: HardDrive, run: () => handleNavigate('system') },
       { id: 'toggle-sidebar', label: 'Toggle navigation menu', hint: 'Ctrl B', icon: PanelLeft, run: handleToggleSidebar },
       { id: 'shortcuts-help', label: 'Show keyboard shortcuts', hint: '?', icon: Keyboard, run: () => setHelpOpen(true) },
       { id: 'show-briefing', label: 'Show daily briefing', icon: Sparkles, run: openBriefing },
