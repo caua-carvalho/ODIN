@@ -188,3 +188,10 @@ Key facts:
 4. **Permission flow**: When the agent tries a WRITE/DELETE/MOVE/EXECUTE outside the workspace, it yields a `permission_request` event. The UI must call `/api/permissions/{id}/approve` or `/api/permissions/{id}/deny` to unblock the agent.
 
 5. **WebSocket chat** (`api/routes/chat.py`) is the real-time streaming endpoint. Clients send `{"type": "message", "content": "..."}` and receive events including `tool_start`/`tool_end`. The agent's `chat()` method yields these events.
+
+## Authentication (optional, for LAN / mobile)
+
+- `ODIN_API_TOKEN` (empty by default = **disabled**, so current behavior is unchanged) adds a bearer-token gate to the API. When set, every `/api/*` request must send `Authorization: Bearer <token>`; `/api/health` is exempt (clients probe it to test connectivity). WebSocket clients that cannot set headers pass `?token=<token>` on `/api/ws/{id}` instead.
+- Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, constant-time compare). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
+- Clients: the mobile app stores the token in its Connect/Settings screen; the web panel reads `localStorage['odin_api_token']` (set it in the browser console).
+- Reaching the backend from a phone requires `ODIN_HOST=0.0.0.0` (the default `127.0.0.1` binds loopback only) — pair it with a token.
