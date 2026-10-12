@@ -4,7 +4,8 @@ import {
   Text,
   ScrollView,
   TextInput,
-  KeyboardAvoidingView,
+  Keyboard,
+  Dimensions,
   Platform,
   Pressable,
 } from 'react-native';
@@ -46,6 +47,35 @@ export default function ConversationScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const stickToBottomRef = useRef(true);
 
+  // --- Keyboard avoidance -------------------------------------------------
+  // On Android (edge-to-edge) the window no longer resizes with the keyboard,
+  // so KeyboardAvoidingView is unreliable — especially inside Expo Go. We
+  // measure the keyboard frame directly and lift the input by exactly that.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(() => Dimensions.get('screen').height);
+
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  // If the platform already shrank the layout (adjustResize in dev/EAS builds),
+  // padding by the full keyboard height would double-shift the input. Only pad
+  // the amount the system did not handle.
+  const systemResized = Math.max(0, Dimensions.get('screen').height - layoutHeight);
+  const inputPaddingBottom = Math.max(0, keyboardHeight - systemResized);
+  // ------------------------------------------------------------------------
+
   const session = useOdinSession(conversationId);
 
   const handleSend = useCallback(() => {
@@ -71,12 +101,12 @@ export default function ConversationScreen() {
   const busy = session.sessionState !== 'idle';
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-surface-canvas">
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        className="flex-1"
-        keyboardVerticalOffset={0}
-      >
+    <SafeAreaView
+      edges={['top']}
+      className="flex-1 bg-surface-canvas"
+      onLayout={(e) => setLayoutHeight(e.nativeEvent.layout.height)}
+    >
+      <View className="flex-1">
         {/* Header */}
         <View className="px-4 py-2.5 flex-row items-center gap-3 border-b border-line bg-surface-base">
           <Pressable onPress={() => router.back()} hitSlop={10} className="p-1" accessibilityLabel="Voltar">
@@ -162,7 +192,10 @@ export default function ConversationScreen() {
         </ScrollView>
 
         {/* Input */}
-        <View className="border-t border-line bg-surface-base px-3 py-2.5">
+        <View
+          className="border-t border-line bg-surface-base px-3 py-2.5"
+          style={{ paddingBottom: inputPaddingBottom + 10 }}
+        >
           <View className="flex-row items-end gap-2 bg-surface-elevated border border-line rounded-xl px-3 py-2">
             <Text className="text-accent font-mono text-sm pb-1">›</Text>
             <TextInput
@@ -198,7 +231,7 @@ export default function ConversationScreen() {
             </Text>
           ) : null}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

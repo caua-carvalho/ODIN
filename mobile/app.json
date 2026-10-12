@@ -15,6 +15,7 @@
     },
     "android": {
       "package": "com.caua.odin",
+      "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "backgroundColor": "#050505",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
