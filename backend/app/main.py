@@ -18,6 +18,7 @@ from app.tools.shell.tools import ExecuteCommandTool
 from app.tools.projects.tools import create_project_tools
 from app.security.path_guard import PathGuard
 from app.security.policy import SecurityPolicy
+from app.security.auth import TokenAuthMiddleware
 from app.api.websocket import ws_manager
 
 # Configure logging
@@ -88,6 +89,13 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Optional API token. Registered BEFORE CORS so that CORSMiddleware is added
+# last and stays the outermost layer — it must answer preflight OPTIONS
+# requests (which carry no Authorization header) before the auth gate runs.
+if settings.odin_api_token:
+    app.add_middleware(TokenAuthMiddleware, token=settings.odin_api_token)
+    logger.info("API token authentication enabled (ODIN_API_TOKEN set)")
 
 # CORS
 app.add_middleware(
