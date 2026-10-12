@@ -86,7 +86,12 @@ export default function SettingsScreen() {
     <Screen
       title="Configurações"
       right={
-        <Pressable onPress={() => router.back()} hitSlop={10} className="p-1">
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={10}
+          className="p-1"
+          accessibilityLabel="Voltar"
+        >
           <ArrowLeft size={20} color="#A1A1A6" />
         </Pressable>
       }

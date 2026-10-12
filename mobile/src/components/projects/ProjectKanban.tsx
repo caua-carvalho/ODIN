@@ -2,11 +2,12 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Draggable, Droppable, DropProvider } from 'react-native-reanimated-dnd';
-import { Plus, Circle, Loader2, CheckCircle2 } from 'lucide-react-native';
+import { Plus, Circle, Loader2, CheckCircle2, Trash2 } from 'lucide-react-native';
 
 import { projectsApi } from '../../api/projects';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TaskFormDialog } from './TaskFormDialog';
 import {
   KANBAN_COLUMNS,
@@ -33,14 +34,20 @@ interface ProjectKanbanProps {
 export function ProjectKanban({ projectId, tasks, loading, error, onChanged }: ProjectKanbanProps) {
   const queryClient = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Task | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
+    onChanged();
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: Parameters<typeof projectsApi.createTask>[1]) =>
       projectsApi.createTask(projectId, data),
     onSuccess: () => {
       setFormOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
-      onChanged();
+      invalidate();
     },
   });
 
@@ -48,15 +55,23 @@ export function ProjectKanban({ projectId, tasks, loading, error, onChanged }: P
     mutationFn: ({ id, data }: { id: string; data: Parameters<typeof projectsApi.updateTask>[1] }) =>
       projectsApi.updateTask(id, data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['tasks', projectId] });
-      onChanged();
+      setFormOpen(false);
+      invalidate();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => projectsApi.deleteTask(id),
+    onSuccess: () => {
+      setDeleteTarget(null);
+      invalidate();
     },
   });
 
   /**
    * Real drag & drop between columns: each column is a `Droppable` zone and
    * every card is a `Draggable`. Dropping a card on another column moves the
-   * task to the end of that column.
+   * task to the end of that column. Precise ordering lives in the TODO view.
    */
   const handleDrop = useCallback(
     (task: Task, column: TaskStatus) => {
@@ -70,8 +85,17 @@ export function ProjectKanban({ projectId, tasks, loading, error, onChanged }: P
     [tasks, updateMutation]
   );
 
-  const handleAdd = (data: object) => {
-    createMutation.mutate(data as Parameters<typeof projectsApi.createTask>[1]);
+  const openEdit = (task: Task) => {
+    setEditing(task);
+    setFormOpen(true);
+  };
+
+  const handleConfirm = (data: object) => {
+    if (editing) {
+      updateMutation.mutate({ id: editing.id, data });
+    } else {
+      createMutation.mutate(data as Parameters<typeof projectsApi.createTask>[1]);
+    }
   };
 
   if (loading) {
@@ -132,7 +156,11 @@ export function ProjectKanban({ projectId, tasks, loading, error, onChanged }: P
                     <View className="p-2 gap-2 min-h-[160px]">
                       {columnTasks.map((task) => (
                         <Draggable key={task.id} data={task} preDragDelay={120}>
-                          <KanbanCard task={task} />
+                          <KanbanCard
+                            task={task}
+                            onPress={() => openEdit(task)}
+                            onDelete={() => setDeleteTarget(task)}
+                          />
                         </Draggable>
                       ))}
                       {columnTasks.length === 0 ? (
@@ -151,28 +179,58 @@ export function ProjectKanban({ projectId, tasks, loading, error, onChanged }: P
 
       <TaskFormDialog
         open={formOpen}
-        busy={createMutation.isPending}
-        onConfirm={handleAdd}
+        initial={editing}
+        busy={createMutation.isPending || updateMutation.isPending}
+        onConfirm={handleConfirm}
         onClose={() => setFormOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Excluir tarefa?"
+        description={deleteTarget ? `"${deleteTarget.title}" será removida.` : ''}
+        confirmLabel="Excluir"
+        danger
+        busy={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onClose={() => setDeleteTarget(null)}
       />
     </View>
   );
 }
 
-function KanbanCard({ task }: { task: Task }) {
+function KanbanCard({
+  task,
+  onPress,
+  onDelete,
+}: {
+  task: Task;
+  onPress: () => void;
+  onDelete: () => void;
+}) {
   const isDone = task.status === 'done';
   return (
     <Pressable
+      onPress={onPress}
       className={cn(
         'bg-surface-base border border-line rounded-xl px-3 py-2.5 gap-1.5',
         isDone && 'opacity-60'
       )}
+      accessibilityLabel={`Editar tarefa ${task.title}`}
     >
       <View className="flex-row items-start gap-2">
         <View className="w-1 self-stretch rounded-full" style={{ backgroundColor: PRIORITY_BAR[task.priority] }} />
         <Text className="flex-1 text-xs text-primary leading-snug" numberOfLines={3}>
           {task.title}
         </Text>
+        <Pressable
+          onPress={onDelete}
+          hitSlop={8}
+          className="p-1 -m-1"
+          accessibilityLabel={`Excluir tarefa ${task.title}`}
+        >
+          <Trash2 size={13} color="#6E6E73" />
+        </Pressable>
       </View>
       <View className="flex-row items-center justify-between">
         <Text className="font-mono text-[9px] uppercase" style={{ color: PRIORITY_BAR[task.priority] }}>

@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { PageFallback } from '../components/PageFallback';
 import { CommandPalette, type PaletteAction } from '../components/CommandPalette';
 import { ShortcutsHelp } from '../components/ShortcutsHelp';
 import { BriefingModal } from '../components/BriefingModal';
@@ -278,7 +279,9 @@ export function AppLayout() {
           className="flex-1 min-h-0 overflow-auto p-4 md:p-6 lg:p-8 animate-page-in focus:outline-none"
         >
           <WsStatusContext.Provider value={wsStatus}>
-            <Outlet />
+            <Suspense fallback={<PageFallback />}>
+              <Outlet />
+            </Suspense>
           </WsStatusContext.Provider>
         </main>
       </div>

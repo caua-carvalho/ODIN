@@ -47,11 +47,13 @@ export default function ChatListScreen() {
     <Screen
       title="Chat"
       subtitle="Conversas com o agente ODIN"
+      scroll={false}
       right={
         <Button
           size="sm"
           variant="subtle-accent"
           loading={createMutation.isPending}
+          accessibilityLabel="Criar conversa"
           onPress={() => createMutation.mutate()}
         >
           <Plus size={16} color="#FF7A00" />
@@ -76,7 +78,7 @@ export default function ChatListScreen() {
           data={conversations.data}
           keyExtractor={(c) => c.id}
           className="flex-1"
-          contentContainerStyle={{ paddingBottom: 16, gap: 8 }}
+          contentContainerStyle={{ paddingBottom: 96, gap: 8 }}
           refreshControl={
             <RefreshControl
               refreshing={conversations.isRefetching}
@@ -84,7 +86,6 @@ export default function ChatListScreen() {
               tintColor="#FF7A00"
             />
           }
-          ItemSeparatorComponent={() => <View className="h-2" />}
           renderItem={({ item }) => {
             const isDeleting = deleteMutation.isPending && deleteMutation.variables === item.id;
             return (
@@ -103,7 +104,8 @@ export default function ChatListScreen() {
                 <Pressable
                   onPress={() => setDeleteTarget(item)}
                   className="p-2"
-                  hitSlop={8}
+                  hitSlop={10}
+                  accessibilityLabel={`Excluir conversa ${item.title || ''}`}
                 >
                   {isDeleting ? (
                     <Text className="text-[10px] text-muted font-mono">…</Text>

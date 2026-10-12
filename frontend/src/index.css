@@ -197,6 +197,173 @@ dialog.odin-dialog[open]::backdrop {
   to { opacity: 1; }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Rich chat markdown
+   Rendered by MarkdownRenderer (chat assistant messages).
+   Plain CSS (not @apply) so it works without a Tailwind @reference.
+   ───────────────────────────────────────────────────────────── */
+.odin-markdown {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.odin-markdown > *:first-child { margin-top: 0; }
+.odin-markdown > *:last-child { margin-bottom: 0; }
+
+.odin-markdown p { margin: 0.5rem 0; }
+
+.odin-markdown h1,
+.odin-markdown h2,
+.odin-markdown h3,
+.odin-markdown h4 {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.1rem 0 0.5rem;
+}
+.odin-markdown h1 { font-size: 1.25rem; }
+.odin-markdown h2 { font-size: 1.1rem; }
+.odin-markdown h3 { font-size: 0.975rem; }
+.odin-markdown h4 { font-size: 0.9rem; }
+
+.odin-markdown ul,
+.odin-markdown ol { margin: 0.5rem 0; padding-left: 1.25rem; }
+.odin-markdown ul { list-style: disc; }
+.odin-markdown ol { list-style: decimal; }
+.odin-markdown li { margin: 0.2rem 0; }
+.odin-markdown li::marker { color: var(--color-text-muted); }
+.odin-markdown li > ul,
+.odin-markdown li > ol { margin: 0.2rem 0; }
+
+.odin-markdown a {
+  color: var(--color-accent-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.odin-markdown a:hover { color: var(--color-accent-primary); }
+
+.odin-markdown strong { color: var(--color-text-primary); font-weight: 600; }
+.odin-markdown em { color: var(--color-text-primary); }
+
+.odin-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-border-subtle);
+  margin: 1.25rem 0;
+}
+
+.odin-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+
+.odin-markdown blockquote.odin-blockquote {
+  margin: 0.75rem 0;
+  padding: 0.15rem 0 0.15rem 0.9rem;
+  border-left: 2px solid var(--color-border-subtle);
+  color: var(--color-text-muted);
+}
+.odin-markdown .odin-callout-body blockquote.odin-blockquote { margin: 0.25rem 0; }
+
+/* Tables */
+.odin-table-wrap {
+  margin: 0.75rem 0;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.odin-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+.odin-table-wrap th {
+  text-align: left;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  white-space: nowrap;
+}
+.odin-table-wrap td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  vertical-align: top;
+}
+.odin-table-wrap tbody tr:last-child td { border-bottom: none; }
+.odin-table-wrap tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+/* Mermaid */
+.odin-mermaid svg { max-width: 100%; height: auto; }
+
+/* ─────────────────────────────────────────────────────────────
+   highlight.js — ODIN palette
+   ───────────────────────────────────────────────────────────── */
+.hljs {
+  color: #d4d4d8;
+  background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-literal,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-name,
+.hljs-section {
+  color: var(--color-accent-primary);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: #7ee2a8;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: #c9a7ff;
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-built_in {
+  color: var(--color-accent-subtle);
+}
+
+.hljs-attr,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-params {
+  color: #ffb86b;
+}
+
+.hljs-deletion { color: #ff7b72; }
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
 /* Respect users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,

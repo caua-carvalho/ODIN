@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 export interface ServerConfig {
   /** Base URL of the Odin backend, e.g. http://192.168.0.10:8000 */
@@ -7,7 +9,15 @@ export interface ServerConfig {
   token: string;
 }
 
+/**
+ * Key used in both SecureStore (native) and AsyncStorage (web fallback and
+ * legacy storage). The token is a bearer credential, so on iOS/Android it must
+ * live in the Keychain/Keystore via expo-secure-store — never plaintext.
+ */
 const STORAGE_KEY = 'odin.serverConfig.v1';
+
+/** SecureStore is not available on web; fall back to AsyncStorage there. */
+const canUseSecureStore = Platform.OS !== 'web';
 
 /**
  * Module-level cache of the active server config. The API client and the
@@ -16,9 +26,46 @@ const STORAGE_KEY = 'odin.serverConfig.v1';
  */
 let cached: ServerConfig | null = null;
 
+async function readRaw(): Promise<string | null> {
+  if (canUseSecureStore) return SecureStore.getItemAsync(STORAGE_KEY);
+  return AsyncStorage.getItem(STORAGE_KEY);
+}
+
+async function writeRaw(value: string): Promise<void> {
+  if (canUseSecureStore) {
+    await SecureStore.setItemAsync(STORAGE_KEY, value);
+  } else {
+    await AsyncStorage.setItem(STORAGE_KEY, value);
+  }
+}
+
+async function removeRaw(): Promise<void> {
+  if (canUseSecureStore) {
+    await SecureStore.deleteItemAsync(STORAGE_KEY);
+  }
+  // Always clean the AsyncStorage copy too, so no plaintext token lingers.
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
+/** Migrate a config previously stored in AsyncStorage into SecureStore. */
+async function migrateLegacyConfig(): Promise<void> {
+  if (!canUseSecureStore) return;
+  try {
+    const legacy = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!legacy) return;
+    const parsed = JSON.parse(legacy) as ServerConfig;
+    if (!parsed || typeof parsed.url !== 'string' || !parsed.url.trim()) return;
+    await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(normalize(parsed)));
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Corrupt or unreadable legacy data — ignore, the user can reconfigure.
+  }
+}
+
 export async function loadStoredConfig(): Promise<ServerConfig | null> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    await migrateLegacyConfig();
+    const raw = await readRaw();
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ServerConfig;
     if (!parsed || typeof parsed.url !== 'string' || !parsed.url.trim()) return null;
@@ -31,14 +78,14 @@ export async function loadStoredConfig(): Promise<ServerConfig | null> {
 
 export async function saveConfig(config: ServerConfig): Promise<ServerConfig> {
   const next = normalize(config);
+  await writeRaw(JSON.stringify(next));
   cached = next;
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   return next;
 }
 
 export async function clearConfig(): Promise<void> {
   cached = null;
-  await AsyncStorage.removeItem(STORAGE_KEY);
+  await removeRaw();
 }
 
 export function getClientConfig(): ServerConfig | null {

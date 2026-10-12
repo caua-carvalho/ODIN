@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import { cn } from '../lib/utils';
+import { prefetchRoute } from '../lib/routePrefetch';
 import { Button } from '../components/ui/Button';
 import { Separator } from '../components/ui/Separator';
 import {
@@ -71,6 +72,8 @@ export function Sidebar({ isOpen, activePage, onNavigate, healthData, firstNavRe
               size="md"
               className="w-full justify-start gap-3 px-3 rounded-xl"
               onClick={() => onNavigate(item.id)}
+              onMouseEnter={() => prefetchRoute(item.id)}
+              onFocus={() => prefetchRoute(item.id)}
               aria-current={isActive ? 'page' : undefined}
             >
               <Icon size={18} aria-hidden="true" />

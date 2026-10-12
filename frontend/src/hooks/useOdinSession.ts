@@ -9,7 +9,7 @@ export type SessionState = 'idle' | 'thinking' | 'waiting_auth' | 'streaming' | 
 
 /** Unified timeline entries: persisted messages, tool runs and permission intercepts, in arrival order. */
 export type TimelineEntry =
-  | { kind: 'message'; id: string; message: Message }
+  | { kind: 'message'; id: string; message: Message; streaming?: boolean }
   | { kind: 'tool'; id: string; execution: ToolExecutionData }
   | { kind: 'permission'; id: string; event: PermissionRequestEvent; resolved?: boolean };
 
@@ -104,6 +104,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
                 next[idx] = {
                   ...entry,
                   message: { ...entry.message, content },
+                  streaming: true,
                 };
                 return next;
               }
@@ -120,7 +121,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
               tool_call_id: null,
               created_at: new Date().toISOString(),
             };
-            return [...prev, { kind: 'message', id, message: msg }];
+            return [...prev, { kind: 'message', id, message: msg, streaming: true }];
           });
           break;
         }
@@ -194,6 +195,14 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
           // Intentionally keep the in-memory timeline: tool and permission
           // cards are not persisted by the backend, so reloading here would
           // wipe them. History reload happens on conversation switch/manual refresh.
+          // Clear the streaming flag so code/diagrams finish rendering.
+          setTimeline((prev) =>
+            prev.some((e) => e.kind === 'message' && e.streaming)
+              ? prev.map((e) =>
+                  e.kind === 'message' && e.streaming ? { ...e, streaming: false } : e
+                )
+              : prev
+          );
           break;
         }
 
@@ -202,6 +211,13 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
           setStreamError(event.message);
           streamBufferRef.current = '';
           streamEntryIdRef.current = null;
+          setTimeline((prev) =>
+            prev.some((e) => e.kind === 'message' && e.streaming)
+              ? prev.map((e) =>
+                  e.kind === 'message' && e.streaming ? { ...e, streaming: false } : e
+                )
+              : prev
+          );
           break;
         }
 

@@ -185,6 +185,7 @@ export function ProjectWorkspace({ projectId }: ProjectWorkspaceProps) {
             <Pressable
               onPress={() => (item.is_dir ? openDir(item) : void handleDownload(item))}
               className="bg-surface-base border border-line rounded-xl px-3.5 py-3 flex-row items-center gap-3 active:bg-surface-container"
+              accessibilityLabel={item.is_dir ? `Abrir pasta ${item.name}` : `Baixar arquivo ${item.name}`}
             >
               {item.is_dir ? (
                 <Folder size={18} color="#FF9A3D" />
@@ -206,7 +207,7 @@ export function ProjectWorkspace({ projectId }: ProjectWorkspaceProps) {
               ) : item.is_dir ? (
                 <ChevronRight size={16} color="#3a3a40" />
               ) : null}
-              <Pressable onPress={() => setDeleteTarget(item)} hitSlop={8} className="p-2">
+              <Pressable onPress={() => setDeleteTarget(item)} hitSlop={10} className="p-2" accessibilityLabel={`Excluir ${item.name}`}>
                 <Trash2 size={15} color="#6E6E73" />
               </Pressable>
             </Pressable>

@@ -1,9 +1,16 @@
 import { Text, View } from 'react-native';
 import { cn } from '../../lib/utils';
 import { formatClock } from '../../lib/format';
+import { MarkdownRenderer } from '../markdown/MarkdownRenderer';
 import type { Message } from '../../types/conversation';
 
-export function MessageBubble({ message }: { message: Message }) {
+export function MessageBubble({
+  message,
+  streaming,
+}: {
+  message: Message;
+  streaming?: boolean;
+}) {
   if (message.role === 'tool') {
     return (
       <View className="bg-surface-container border border-line rounded-lg px-3 py-2">
@@ -34,16 +41,15 @@ export function MessageBubble({ message }: { message: Message }) {
         </Text>
         <Text className="text-[10px] text-muted font-mono">{formatClock(message.created_at)}</Text>
       </View>
-      <Text
-        className={cn(
-          'text-sm leading-relaxed whitespace-pre-wrap',
-          isUser ? 'text-primary' : 'text-secondary'
-        )}
-      >
-        {message.content || (
-          <Text className="italic font-mono text-xs text-muted">streaming…</Text>
-        )}
-      </Text>
+      {isUser ? (
+        <Text className="text-sm leading-relaxed whitespace-pre-wrap text-primary">
+          {message.content}
+        </Text>
+      ) : message.content ? (
+        <MarkdownRenderer content={message.content} streaming={streaming} />
+      ) : (
+        <Text className="italic font-mono text-xs text-muted">streaming…</Text>
+      )}
     </View>
   );
 }

@@ -12,6 +12,52 @@ export class ApiError extends Error {
   }
 }
 
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** Map low-level fetch failures to user-friendly, pt-BR messages. */
+function translateFetchError(err: unknown): Error {
+  if (err instanceof Error && err.name === 'AbortError') {
+    return new Error(
+      'Tempo limite excedido. Verifique se o servidor está acessível na rede.'
+    );
+  }
+  if (
+    err instanceof TypeError ||
+    (err instanceof Error && /network request failed/i.test(err.message))
+  ) {
+    return new Error(
+      'Não foi possível conectar ao servidor. Verifique a URL e se o backend está rodando.'
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
+ * fetch com timeout. Combina o signal do chamador (se houver) com o nosso
+ * AbortController, e converte erros de rede/timeout em mensagens legíveis.
+ */
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const { signal: callerSignal, ...rest } = init;
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', onCallerAbort);
+  }
+  try {
+    return await fetch(input, { ...rest, signal: controller.signal });
+  } catch (err) {
+    throw translateFetchError(err);
+  } finally {
+    clearTimeout(timeout);
+    if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort);
+  }
+}
+
 function authHeaders(): Record<string, string> {
   const token = getClientConfig()?.token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -49,7 +95,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(absoluteUrl(endpoint), {
+  const response = await fetchWithTimeout(absoluteUrl(endpoint), {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -74,7 +120,7 @@ export const api = {
  * objects appended to a FormData.
  */
 export async function upload<T>(endpoint: string, formData: FormData): Promise<T> {
-  const response = await fetch(absoluteUrl(endpoint), {
+  const response = await fetchWithTimeout(absoluteUrl(endpoint), {
     method: 'POST',
     body: formData,
     headers: authHeaders(),
