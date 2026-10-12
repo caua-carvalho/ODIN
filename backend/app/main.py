@@ -15,6 +15,7 @@ from app.agent.providers import catalog, create_llm_provider
 from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
+from app.tools.projects.tools import create_project_tools
 from app.security.path_guard import PathGuard
 from app.security.policy import SecurityPolicy
 from app.api.websocket import ws_manager
@@ -57,6 +58,9 @@ async def lifespan(app: FastAPI):
 
     shell_tool = ExecuteCommandTool(security_policy, path_guard, ws_manager)
     tool_registry.register(shell_tool)
+
+    for project_tool in create_project_tools(security_policy):
+        tool_registry.register(project_tool)
 
     logger.info(f"Registered {len(tool_registry)} tools: {tool_registry.names()}")
 
