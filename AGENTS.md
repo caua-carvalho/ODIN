@@ -75,8 +75,10 @@ The backend supports **three** LLM providers, registered in `backend/app/agent/p
 
 - `.env` is at the repo root. It is **git-ignored** (but `.env.example` is committed so others can see the schema).
 - `ODIN_WORKSPACE` defaults to `/home/caua/odin-workspace` (configure in `.env` or `Settings.odin_workspace`).
+- `ODIN_WEATHER_CITY` (default `São José dos Campos`) plus `ODIN_WEATHER_LAT` / `ODIN_WEATHER_LON` drive the Open-Meteo weather lookup used by the briefing's `weather` section.
+- `ODIN_BRIEFING_REPOS` is a comma-separated list of repo paths reported in the briefing's `git` array (paths that are not git repos come back as `null`).
 - `DATABASE_URL` defaults to `sqlite+aiosqlite:///./odin.db` (a local SQLite file kept in the repo root).
-- The `.env.example` lists all available env vars: model provider, model name, API keys, database URL, host/port, debug flag.
+- The `.env.example` lists all available env vars: model provider, model name, API keys, database URL, host/port, debug flag, and the daily-briefing weather/repo settings.
 
 ## Security & path boundaries
 
@@ -108,7 +110,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence
@@ -130,6 +132,9 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `DELETE /api/conversations/{id}` | Delete a conversation |
 | `GET /api/conversations/{id}/messages` | Get messages for a conversation |
 | `GET /api/system` | System info (psutil: cpu, memory, disk, uptime) — **requires psutil** |
+| `GET /api/briefing` | Aggregated daily briefing (weather, git, recent files, system, runtime, permissions, recent conversations) plus `should_show` for the boot-once modal |
+| `POST /api/briefing/summary` | Generate a short LLM narrative of the briefing (`{"summary": null}` when no provider/agent is available) |
+| `POST /api/briefing/ack` | Mark this boot's briefing as shown so it does not reappear (persists the current `boot_time` in `app_state`) |
 | `GET /api/tools` | List registered tools |
 | `GET /api/skills` | List skill groupings (Filesystem, Development, System, ...) over registered tools |
 | `GET /api/providers` | List LLM providers (availability + models) and the active selection |
@@ -150,6 +155,8 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `DELETE /api/projects/{id}/files` | Delete a workspace file or directory (`?path=`) |
 
 > **Beware the SPA fallback**: `main.py` registers a catch-all `GET /{full_path:path}` that returns `index.html` with **HTTP 200** for any unmatched path. A typo'd API route (e.g. the old `GET /api/system/info`) therefore returns HTML — not a 404 — so always verify the endpoint exists in `/openapi.json` (the catch-all is excluded from the schema).
+
+> **Daily briefing (boot-once)**: The briefing is meant to appear **once per boot**. `GET /api/briefing` compares the current `psutil.boot_time()` against the value stored in the `app_state` table (key `last_briefing_boot`) and returns `should_show`; the panel acknowledges it via `POST /api/briefing/ack`, which writes the current boot_time so subsequent loads return `should_show: false` for the same boot. On the frontend the modal lives in `AppLayout.tsx` (not a page), auto-opens on first load over the default Dashboard route, and is also re-openable from the command palette ("Show daily briefing"). The briefing contract is frozen in `frontend/src/types/briefing.ts` and must mirror `backend/app/api/routes/briefing.py`.
 
 ## Projects (TODO / Kanban / workspace)
 
@@ -173,7 +180,7 @@ Key facts:
 
 - SQLite async (SQLAlchemy) — file is `odin.db` at the repo root.
 - On every startup, `init_db()` creates tables if they don't exist (`backend/app/database/session.py`).
-- Tables: `conversations`, `messages`, `permission_requests`, `projects`, `tasks`.
+- Tables: `conversations`, `messages`, `permission_requests`, `projects`, `tasks`, `app_state` (generic key/value store; holds `last_briefing_boot` for the boot-once briefing).
 - Use `get_db_session()` (context manager) or `get_db()` (FastAPI dependency) for DB access.
 - Permission requests are the mechanism that blocks/unblocks filesystem/shell operations outside the workspace.
 

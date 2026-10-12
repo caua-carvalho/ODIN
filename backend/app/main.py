@@ -107,7 +107,7 @@ app.add_middleware(
 )
 
 # Mount routers
-from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, projects
+from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, projects, briefing
 
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
@@ -117,6 +117,7 @@ app.include_router(permissions.router, prefix="/api/permissions", tags=["permiss
 app.include_router(mcp.router, prefix="/api/mcp", tags=["mcp"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
+app.include_router(briefing.router, prefix="/api/briefing", tags=["briefing"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 
 

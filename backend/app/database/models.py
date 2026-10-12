@@ -71,6 +71,15 @@ class Task(Base):
     )
 
 
+class AppState(Base):
+    """Small key/value store for process-external state (e.g. boot-once flags)."""
+
+    __tablename__ = "app_state"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 class PermissionRequest(Base):
     __tablename__ = "permission_requests"
 
