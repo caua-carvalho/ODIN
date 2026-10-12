@@ -1,5 +1,20 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+/**
+ * Optional API token for the mobile/remote clients.
+ *
+ * Set `localStorage['odin_api_token']` (e.g. in the browser console:
+ * `localStorage.setItem('odin_api_token', '<token>')`) to authenticate every
+ * API/WebSocket request once the backend has ODIN_API_TOKEN enabled.
+ */
+export function getApiToken(): string {
+  try {
+    return window.localStorage.getItem('odin_api_token') || '';
+  } catch {
+    return '';
+  }
+}
+
 class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -38,12 +53,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  const token = getApiToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   return parseResponse<T>(response);
@@ -51,9 +70,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 /** Upload a multipart body. Content-Type is set by the browser (boundary). */
 async function upload<T>(endpoint: string, formData: FormData): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = getApiToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     method: 'POST',
     body: formData,
+    headers,
   });
   return parseResponse<T>(response);
 }
