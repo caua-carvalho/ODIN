@@ -101,7 +101,7 @@ export default function SettingsScreen() {
           ) : null}
         </View>
 
-        <Input label="URL do servidor" placeholder="http://192.168.0.10:8000" autoCapitalize="none" autoCorrect={false} keyboardType="url" value={url} onChangeText={setUrl} />
+        <Input label="URL do servidor" placeholder="http://<ip-da-maquina>:8000" autoCapitalize="none" autoCorrect={false} keyboardType="url" value={url} onChangeText={setUrl} />
         <Input label="Token (opcional)" placeholder="Bearer token do backend" autoCapitalize="none" autoCorrect={false} secureTextEntry value={token} onChangeText={setToken} />
 
         {testResult ? (
