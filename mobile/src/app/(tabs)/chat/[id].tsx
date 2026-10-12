@@ -5,7 +5,6 @@ import {
   ScrollView,
   TextInput,
   Keyboard,
-  Dimensions,
   Platform,
   Pressable,
 } from 'react-native';
@@ -49,31 +48,73 @@ export default function ConversationScreen() {
 
   // --- Keyboard avoidance -------------------------------------------------
   // On Android (edge-to-edge) the window no longer resizes with the keyboard,
-  // so KeyboardAvoidingView is unreliable — especially inside Expo Go. We
-  // measure the keyboard frame directly and lift the input by exactly that.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [layoutHeight, setLayoutHeight] = useState(() => Dimensions.get('screen').height);
+  // so KeyboardAvoidingView is unreliable — especially inside Expo Go, whose
+  // native resize behavior varies per device. Instead of estimating the
+  // keyboard height, we MEASURE the input's actual position on screen and pad
+  // by exactly the amount it overlaps the keyboard frame. Self-correcting in
+  // every mode (adjustResize, pan, gesture-nav insets).
+  const inputBoxRef = useRef<View>(null);
+  const kbTopRef = useRef(0);
+  const kbEstimateRef = useRef(0);
+  const reMeasureCountRef = useRef(0);
+  const reMeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Indirection so the re-measure loop can schedule itself without a
+  // self-reference inside the callback (flagged by react-hooks/immutability).
+  const reMeasureFnRef = useRef<() => void>(() => {});
+  const [inputPad, setInputPad] = useState(0);
+
+  const reMeasureOverlap = useCallback(() => {
+    const box = inputBoxRef.current;
+    if (!box) return;
+    box.measureInWindow((_x, y, _w, h) => {
+      if (!h) {
+        // Measurement unavailable — fall back to the reported keyboard height.
+        setInputPad(kbEstimateRef.current);
+        return;
+      }
+      const pad = Math.max(0, y + h - kbTopRef.current + 8);
+      setInputPad(pad);
+      if (pad > 0 && reMeasureCountRef.current < 8) {
+        // Tab-bar hide / resize animations may still be settling: re-measure
+        // until the input clears the keyboard.
+        reMeasureCountRef.current += 1;
+        if (reMeasureTimerRef.current) clearTimeout(reMeasureTimerRef.current);
+        reMeasureTimerRef.current = setTimeout(() => reMeasureFnRef.current?.(), 120);
+      } else {
+        reMeasureCountRef.current = 0;
+      }
+    });
+  }, []);
+
+  // Keep the recursive-entry ref in sync with the current callback.
+  useEffect(() => {
+    reMeasureFnRef.current = reMeasureOverlap;
+  }, [reMeasureOverlap]);
 
   useEffect(() => {
     const show = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => setKeyboardHeight(e.endCoordinates.height)
+      (e) => {
+        kbTopRef.current = Math.round(e.endCoordinates.screenY);
+        kbEstimateRef.current = e.endCoordinates.height;
+        reMeasureCountRef.current = 0;
+        requestAnimationFrame(reMeasureOverlap);
+      }
     );
     const hide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKeyboardHeight(0)
+      () => {
+        if (reMeasureTimerRef.current) clearTimeout(reMeasureTimerRef.current);
+        reMeasureTimerRef.current = null;
+        setInputPad(0);
+      }
     );
     return () => {
       show.remove();
       hide.remove();
+      if (reMeasureTimerRef.current) clearTimeout(reMeasureTimerRef.current);
     };
-  }, []);
-
-  // If the platform already shrank the layout (adjustResize in dev/EAS builds),
-  // padding by the full keyboard height would double-shift the input. Only pad
-  // the amount the system did not handle.
-  const systemResized = Math.max(0, Dimensions.get('screen').height - layoutHeight);
-  const inputPaddingBottom = Math.max(0, keyboardHeight - systemResized);
+  }, [reMeasureOverlap]);
   // ------------------------------------------------------------------------
 
   const session = useOdinSession(conversationId);
@@ -101,11 +142,7 @@ export default function ConversationScreen() {
   const busy = session.sessionState !== 'idle';
 
   return (
-    <SafeAreaView
-      edges={['top']}
-      className="flex-1 bg-surface-canvas"
-      onLayout={(e) => setLayoutHeight(e.nativeEvent.layout.height)}
-    >
+    <SafeAreaView edges={['top']} className="flex-1 bg-surface-canvas">
       <View className="flex-1">
         {/* Header */}
         <View className="px-4 py-2.5 flex-row items-center gap-3 border-b border-line bg-surface-base">
@@ -194,9 +231,12 @@ export default function ConversationScreen() {
         {/* Input */}
         <View
           className="border-t border-line bg-surface-base px-3 py-2.5"
-          style={{ paddingBottom: inputPaddingBottom + 10 }}
+          style={{ paddingBottom: inputPad + 10 }}
         >
-          <View className="flex-row items-end gap-2 bg-surface-elevated border border-line rounded-xl px-3 py-2">
+          <View
+            ref={inputBoxRef}
+            className="flex-row items-end gap-2 bg-surface-elevated border border-line rounded-xl px-3 py-2"
+          >
             <Text className="text-accent font-mono text-sm pb-1">›</Text>
             <TextInput
               className="flex-1 text-sm text-primary font-mono min-h-[36px] max-h-[120px] py-0"
