@@ -40,8 +40,21 @@ class Settings(BaseSettings):
     # responses/tool calls with thinking enabled, so the default is false.
     ollama_think: bool = False
 
+    # Daily briefing
+    odin_weather_city: str = "São José dos Campos"
+    odin_weather_lat: float = -23.1794
+    odin_weather_lon: float = -45.8869
+    # Comma-separated list of repository paths to summarise in the briefing.
+    odin_briefing_repos: str = "/home/caua/odin,/home/caua/odin-workspace"
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./odin.db"
+
+    # Security
+    # Optional bearer token required for /api/* (empty = disabled). Enable it
+    # before exposing Odin to the LAN/internet (e.g. for the mobile app or a
+    # remote ODIN_HOST). The mobile client stores it in its settings screen.
+    odin_api_token: str = ""
 
     # Debug
     debug: bool = False

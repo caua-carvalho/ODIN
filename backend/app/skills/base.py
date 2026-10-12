@@ -42,6 +42,32 @@ BUILTIN_SKILLS: List[Skill] = [
         tools=["execute_command", "read_file"],
         icon="🖥️",
     ),
+    Skill(
+        name="Projects",
+        description=(
+            "Organise work into projects. Each project has a TODO list, a Kanban "
+            "board (todo/doing/done) and a file workspace on disk. Odin can create "
+            "projects, manage their tasks and read/write files inside the workspace."
+        ),
+        tools=[
+            "list_projects",
+            "get_project",
+            "create_project",
+            "update_project",
+            "delete_project",
+            "list_tasks",
+            "create_task",
+            "update_task",
+            "move_task",
+            "delete_task",
+            "list_project_files",
+            "read_project_file",
+            "write_project_file",
+            "create_project_directory",
+            "delete_project_file",
+        ],
+        icon="🗂️",
+    ),
 ]
 
 

@@ -15,8 +15,10 @@ from app.agent.providers import catalog, create_llm_provider
 from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
+from app.tools.projects.tools import create_project_tools
 from app.security.path_guard import PathGuard
 from app.security.policy import SecurityPolicy
+from app.security.auth import TokenAuthMiddleware
 from app.api.websocket import ws_manager
 
 # Configure logging
@@ -58,6 +60,9 @@ async def lifespan(app: FastAPI):
     shell_tool = ExecuteCommandTool(security_policy, path_guard, ws_manager)
     tool_registry.register(shell_tool)
 
+    for project_tool in create_project_tools(security_policy):
+        tool_registry.register(project_tool)
+
     logger.info(f"Registered {len(tool_registry)} tools: {tool_registry.names()}")
 
     # Initialize LLM provider (selection lives in providers/factory.py)
@@ -85,6 +90,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Optional API token. Registered BEFORE CORS so that CORSMiddleware is added
+# last and stays the outermost layer — it must answer preflight OPTIONS
+# requests (which carry no Authorization header) before the auth gate runs.
+if settings.odin_api_token:
+    app.add_middleware(TokenAuthMiddleware, token=settings.odin_api_token)
+    logger.info("API token authentication enabled (ODIN_API_TOKEN set)")
+
 # CORS
 # Explicit origin allow-list plus a regex that also accepts dev clients served
 # from a private LAN address (e.g. Expo web at http://192.168.0.10:8081).
@@ -101,15 +113,17 @@ app.add_middleware(
 )
 
 # Mount routers
-from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers
+from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, briefing, projects
 
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
+app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
 app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(permissions.router, prefix="/api/permissions", tags=["permissions"])
 app.include_router(mcp.router, prefix="/api/mcp", tags=["mcp"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
+app.include_router(briefing.router, prefix="/api/briefing", tags=["briefing"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 
 

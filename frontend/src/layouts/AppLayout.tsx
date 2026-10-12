@@ -4,7 +4,9 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette, type PaletteAction } from '../components/CommandPalette';
 import { ShortcutsHelp } from '../components/ShortcutsHelp';
+import { BriefingModal } from '../components/BriefingModal';
 import { healthApi } from '../api/health';
+import { briefingApi } from '../api/briefing';
 import { WsStatusContext } from './ws-status';
 import { useHotkeys, isModalOpen } from '../hooks/useHotkeys';
 import { cn } from '../lib/utils';
@@ -17,26 +19,31 @@ import {
   HardDrive,
   PanelLeft,
   Keyboard,
+  Sparkles,
+  FolderKanban,
 } from 'lucide-react';
 import type { HealthResponse } from '../types/health';
+import type { BriefingResponse } from '../types/briefing';
 
 const PAGE_ROUTES: Record<string, string> = {
   dashboard: '/',
   chat: '/chat',
+  projects: '/projects',
   tools: '/tools',
   skills: '/skills',
   permissions: '/permissions',
   system: '/system',
 };
 
-// 1–6 jump to a page, mirroring the sidebar order.
+// 1–7 jump to a page, mirroring the sidebar order.
 const PAGE_KEYS: Record<string, string> = {
   '1': 'dashboard',
   '2': 'chat',
-  '3': 'tools',
-  '4': 'skills',
-  '5': 'permissions',
-  '6': 'system',
+  '3': 'projects',
+  '4': 'tools',
+  '5': 'skills',
+  '6': 'permissions',
+  '7': 'system',
 };
 
 const isDesktop = () => window.innerWidth >= 1024;
@@ -52,6 +59,8 @@ export function AppLayout() {
   const [activePage, setActivePage] = useState('dashboard');
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [briefingData, setBriefingData] = useState<BriefingResponse | null>(null);
+  const [briefingOpen, setBriefingOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const firstNavRef = useRef<HTMLButtonElement>(null);
 
@@ -64,6 +73,7 @@ export function AppLayout() {
   useEffect(() => {
     const path = location.pathname;
     if (path === '/chat') setActivePage('chat');
+    else if (path.startsWith('/projects')) setActivePage('projects');
     else if (path === '/tools') setActivePage('tools');
     else if (path === '/skills') setActivePage('skills');
     else if (path === '/permissions') setActivePage('permissions');
@@ -95,6 +105,43 @@ export function AppLayout() {
     const interval = setInterval(fetchHealth, 30000);
     return () => clearInterval(interval);
   }, [fetchHealth]);
+
+  // Load the daily briefing once on mount; show the modal only once per boot.
+  useEffect(() => {
+    let alive = true;
+    briefingApi
+      .getBriefing()
+      .then((data) => {
+        if (!alive) return;
+        setBriefingData(data);
+        if (data.should_show) setBriefingOpen(true);
+      })
+      .catch((err) => {
+        console.error('Failed to load briefing:', err);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Closing acknowledges the briefing so it doesn't reappear this boot.
+  const handleCloseBriefing = useCallback(() => {
+    setBriefingOpen(false);
+    briefingApi.ackBriefing().catch((err) => {
+      console.error('Failed to acknowledge briefing:', err);
+    });
+  }, []);
+
+  // Manual reopen (command palette): refresh the payload in the background.
+  const openBriefing = useCallback(() => {
+    setBriefingOpen(true);
+    briefingApi
+      .getBriefing()
+      .then(setBriefingData)
+      .catch((err) => {
+        console.error('Failed to load briefing:', err);
+      });
+  }, []);
 
   // Lock body scroll while the mobile drawer is open so the page behind doesn't move.
   useEffect(() => {
@@ -172,14 +219,16 @@ export function AppLayout() {
     () => [
       { id: 'nav-dashboard', label: 'Go to Dashboard', hint: '1', icon: LayoutDashboard, run: () => handleNavigate('dashboard') },
       { id: 'nav-chat', label: 'Go to Chat', hint: '2', icon: MessageSquare, run: () => handleNavigate('chat') },
-      { id: 'nav-tools', label: 'Go to Tools', hint: '3', icon: Wrench, run: () => handleNavigate('tools') },
-      { id: 'nav-skills', label: 'Go to Skills', hint: '4', icon: Settings, run: () => handleNavigate('skills') },
-      { id: 'nav-permissions', label: 'Go to Permissions', hint: '5', icon: Shield, run: () => handleNavigate('permissions') },
-      { id: 'nav-system', label: 'Go to System', hint: '6', icon: HardDrive, run: () => handleNavigate('system') },
+      { id: 'nav-projects', label: 'Go to Projects', hint: '3', icon: FolderKanban, run: () => handleNavigate('projects') },
+      { id: 'nav-tools', label: 'Go to Tools', hint: '4', icon: Wrench, run: () => handleNavigate('tools') },
+      { id: 'nav-skills', label: 'Go to Skills', hint: '5', icon: Settings, run: () => handleNavigate('skills') },
+      { id: 'nav-permissions', label: 'Go to Permissions', hint: '6', icon: Shield, run: () => handleNavigate('permissions') },
+      { id: 'nav-system', label: 'Go to System', hint: '7', icon: HardDrive, run: () => handleNavigate('system') },
       { id: 'toggle-sidebar', label: 'Toggle navigation menu', hint: 'Ctrl B', icon: PanelLeft, run: handleToggleSidebar },
       { id: 'shortcuts-help', label: 'Show keyboard shortcuts', hint: '?', icon: Keyboard, run: () => setHelpOpen(true) },
+      { id: 'show-briefing', label: 'Show daily briefing', icon: Sparkles, run: openBriefing },
     ],
-    [handleNavigate, handleToggleSidebar]
+    [handleNavigate, handleToggleSidebar, openBriefing]
   );
 
   return (
@@ -252,6 +301,7 @@ export function AppLayout() {
         actions={paletteActions}
       />
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <BriefingModal open={briefingOpen} data={briefingData} onClose={handleCloseBriefing} />
     </div>
   );
 }

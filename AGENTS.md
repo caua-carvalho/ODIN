@@ -75,8 +75,10 @@ The backend supports **three** LLM providers, registered in `backend/app/agent/p
 
 - `.env` is at the repo root. It is **git-ignored** (but `.env.example` is committed so others can see the schema).
 - `ODIN_WORKSPACE` defaults to `/home/caua/odin-workspace` (configure in `.env` or `Settings.odin_workspace`).
+- `ODIN_WEATHER_CITY` (default `São José dos Campos`) plus `ODIN_WEATHER_LAT` / `ODIN_WEATHER_LON` drive the Open-Meteo weather lookup used by the briefing's `weather` section.
+- `ODIN_BRIEFING_REPOS` is a comma-separated list of repo paths reported in the briefing's `git` array (paths that are not git repos come back as `null`).
 - `DATABASE_URL` defaults to `sqlite+aiosqlite:///./odin.db` (a local SQLite file kept in the repo root).
-- The `.env.example` lists all available env vars: model provider, model name, API keys, database URL, host/port, debug flag.
+- The `.env.example` lists all available env vars: model provider, model name, API keys, database URL, host/port, debug flag, and the daily-briefing weather/repo settings.
 
 ## Security & path boundaries
 
@@ -99,6 +101,7 @@ The agent maintains a registry of all available tools, registered during startup
 
 - **Filesystem tools**: `read_file`, `list_directory`, `search_files`, `write_file`, `delete_file`, `move_file`, `create_directory`
 - **Shell tool**: `execute_command`
+- **Project tools**: `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `list_tasks`, `create_task`, `update_task`, `move_task`, `delete_task`, `list_project_files`, `read_project_file`, `write_project_file`, `create_project_directory`, `delete_project_file` (see the Projects section)
 
 Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.to_llm_tools()` (in `backend/app/tools/registry.py`). The registry is a global singleton — if you add a new tool, you must register it in the lifespan section of `main.py`.
 
@@ -107,7 +110,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`. The full suite is ~73 tests and runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence
@@ -129,6 +132,9 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `DELETE /api/conversations/{id}` | Delete a conversation |
 | `GET /api/conversations/{id}/messages` | Get messages for a conversation |
 | `GET /api/system` | System info (psutil: cpu, memory, disk, uptime) — **requires psutil** |
+| `GET /api/briefing` | Aggregated daily briefing (weather, git, recent files, system, runtime, permissions, recent conversations) plus `should_show` for the boot-once modal |
+| `POST /api/briefing/summary` | Generate a short LLM narrative of the briefing (`{"summary": null}` when no provider/agent is available) |
+| `POST /api/briefing/ack` | Mark this boot's briefing as shown so it does not reappear (persists the current `boot_time` in `app_state`) |
 | `GET /api/tools` | List registered tools |
 | `GET /api/skills` | List skill groupings (Filesystem, Development, System, ...) over registered tools |
 | `GET /api/providers` | List LLM providers (availability + models) and the active selection |
@@ -138,14 +144,43 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `GET /api/permissions/pending` | List pending permission requests |
 | `POST /api/permissions/{id}/approve` | Approve a permission request |
 | `POST /api/permissions/{id}/deny` | Deny a permission request |
+| `GET/POST /api/projects` | List / create projects |
+| `GET/PATCH/DELETE /api/projects/{id}` | Read / update / delete a project (delete also removes its workspace directory) |
+| `GET/POST /api/projects/{id}/tasks` | List / create tasks (the same rows power the TODO list and the Kanban) |
+| `PATCH/DELETE /api/tasks/{task_id}` | Update (title, status, priority, position) / delete a task |
+| `POST /api/projects/{id}/tasks/reorder` | Bulk-persist Kanban column/order after a drag-and-drop |
+| `GET/POST /api/projects/{id}/files` | List / upload workspace files (multipart `file` + form field `path`) |
+| `GET /api/projects/{id}/files/download` | Download a workspace file (`?path=`) |
+| `POST /api/projects/{id}/files/mkdir` | Create a workspace directory |
+| `DELETE /api/projects/{id}/files` | Delete a workspace file or directory (`?path=`) |
 
 > **Beware the SPA fallback**: `main.py` registers a catch-all `GET /{full_path:path}` that returns `index.html` with **HTTP 200** for any unmatched path. A typo'd API route (e.g. the old `GET /api/system/info`) therefore returns HTML — not a 404 — so always verify the endpoint exists in `/openapi.json` (the catch-all is excluded from the schema).
+
+> **Daily briefing (boot-once)**: The briefing is meant to appear **once per boot**. `GET /api/briefing` compares the current `psutil.boot_time()` against the value stored in the `app_state` table (key `last_briefing_boot`) and returns `should_show`; the panel acknowledges it via `POST /api/briefing/ack`, which writes the current boot_time so subsequent loads return `should_show: false` for the same boot. On the frontend the modal lives in `AppLayout.tsx` (not a page), auto-opens on first load over the default Dashboard route, and is also re-openable from the command palette ("Show daily briefing"). The briefing contract is frozen in `frontend/src/types/briefing.ts` and must mirror `backend/app/api/routes/briefing.py`.
+
+## Projects (TODO / Kanban / workspace)
+
+The **Projects** tab lets the user organise projects. Each project has three views that share one data model:
+
+- **TODO list** and **Kanban board** are two renderings of the same `tasks` rows: `status` (`todo` | `doing` | `done`) is the Kanban column and `position` orders cards within a column. Editing a task in one view is reflected in the other.
+- **Workspace** is an on-disk folder for arbitrary files (drag-and-drop upload, folder creation, download, delete).
+
+Key facts:
+
+- Project files live at `<ODIN_WORKSPACE>/projects/<slug>/`. Because they are inside the security boundary, the agent's filesystem tools can also read/write them (the daily briefing's "recent files" scan will surface them too).
+- The project root directory is created on project creation and removed (with its contents) when the project is deleted.
+- All file paths are resolved canonically and validated by `resolve_path` in `backend/app/projects/service.py`: absolute paths and `..` traversal are rejected, and nothing may escape the project root. The `slug` is generated from the name (lowercased, non-alphanumerics → `-`, `-2`/`-3` suffix on collision) by `slugify`.
+- **All project domain logic lives in `backend/app/projects/service.py`**, which is the single source of truth for both the REST routes (`app/api/routes/projects.py` is a thin wrapper) and the agent tools (`app/tools/projects/tools.py`). Service functions raise `fastapi.HTTPException` for expected failures (400/404/409); the tools catch them and return `ToolResult(success=False, error=...)`.
+- The 15 project tools are created by `create_project_tools(security_policy)` and registered in the lifespan. They reference a project by **id, slug or (unambiguous) name** (`service.get_project_by_reference`) and a task by **id or (unambiguous) title**; ambiguous references return an error listing the candidates. They all operate inside `ODIN_WORKSPACE`, so the security policy returns ALLOW and no approval is requested.
+- Uploads require **`python-multipart`** (added to `backend/requirements.txt`); re-run `pip install -r requirements.txt` after pulling if it is missing.
+- The routers are registered in `main.py` as `app.include_router(projects.router, prefix="/api", tags=["projects"])` — note the `/api` prefix plus full paths inside the module (`/projects`, `/tasks/{task_id}`), unlike the other routers which pass a resource-specific prefix.
+- Frontend: pages `ProjectsPage.tsx` (grid) and `ProjectDetailPage.tsx` (tabs), components under `frontend/src/components/projects/`, types in `types/project.ts`, API client in `api/projects.ts`. The API client gained `patch` and a multipart `upload` helper. The Kanban uses **native HTML5 drag & drop** (no DnD library). The sidebar item is `Projetos` and the page jump shortcut is now `1–7`.
 
 ## Database
 
 - SQLite async (SQLAlchemy) — file is `odin.db` at the repo root.
 - On every startup, `init_db()` creates tables if they don't exist (`backend/app/database/session.py`).
-- Tables: `conversations`, `messages`, `permission_requests`.
+- Tables: `conversations`, `messages`, `permission_requests`, `app_state` (generic key/value store; holds `last_briefing_boot` for the boot-once briefing), `projects`, `tasks`.
 - Use `get_db_session()` (context manager) or `get_db()` (FastAPI dependency) for DB access.
 - Permission requests are the mechanism that blocks/unblocks filesystem/shell operations outside the workspace.
 
@@ -160,3 +195,20 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 4. **Permission flow**: When the agent tries a WRITE/DELETE/MOVE/EXECUTE outside the workspace, it yields a `permission_request` event. The UI must call `/api/permissions/{id}/approve` or `/api/permissions/{id}/deny` to unblock the agent.
 
 5. **WebSocket chat** (`api/routes/chat.py`) is the real-time streaming endpoint. Clients send `{"type": "message", "content": "..."}` and receive events including `tool_start`/`tool_end`. The agent's `chat()` method yields these events.
+
+## Authentication (optional, for LAN / mobile)
+
+- `ODIN_API_TOKEN` (empty by default = **disabled**, so current behavior is unchanged) adds a bearer-token gate to the API. When set, every `/api/*` request must send `Authorization: Bearer <token>`; `/api/health` is exempt (clients probe it to test connectivity). WebSocket clients that cannot set headers pass `?token=<token>` on `/api/ws/{id}` instead.
+- Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, constant-time compare). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
+- Clients: the mobile app stores the token in its Connect/Settings screen; the web panel reads `localStorage['odin_api_token']` (set it in the browser console).
+- Reaching the backend from a phone requires `ODIN_HOST=0.0.0.0` (the default `127.0.0.1` binds loopback only) — pair it with a token.
+- `scripts/server.sh` (used by `odin start/restart`) reads `ODIN_HOST`/`ODIN_PORT` **from the repo `.env`** (falling back to an exported shell var, then `127.0.0.1:8000`). So setting `ODIN_HOST=0.0.0.0` in `.env` and running `odin restart` is enough — no manual `export` needed.
+- **CORS is only a browser concern** (Vite web panel, Expo **web**). Native Expo Go does not enforce it; its failure mode is `java.net.ConnectException ... 127.0.0.1:8000`, which means the app is still pointing at `127.0.0.1` instead of the machine's LAN IP (`hostname -I`). Set the app's server URL to `http://<lan-ip>:8000`. The allowed origins/regex live in `settings.odin_cors_origins` / `odin_cors_origin_regex` (`main.py`); the defaults include `:3000` (Vite) and `:8081` (Expo web) plus any private-LAN origin.
+
+## Mobile app (`mobile/`)
+
+Expo (SDK 57) + React Native + Expo Router + NativeWind client mirroring the web panel (Dashboard, Chat, Projects TODO/Kanban/Workspace, Permissions, Tools, Skills, System, Settings). It has its own toolchain and `mobile/AGENTS.md`; run its commands from `mobile/` (`npx expo start`, `npx tsc --noEmit`, `npx expo lint`, `npx expo-doctor`). It is **not** part of the Vite build and is not served by the backend.
+
+- First launch shows a `connect` screen (server URL + optional token), persisted via AsyncStorage (`src/lib/config.ts`); the root `Stack.Protected` guard in `src/app/_layout.tsx` reveals the `(tabs)` navigator once configured.
+- Kanban uses real cross-column drag & drop via `react-native-reanimated-dnd` (Draggable cards + Droppable columns); precise ordering lives in the TODO view.
+- Binaries are built with EAS (`mobile/eas.json`): `npx eas-cli@latest build --profile preview` (Android APK) / `production` (AAB + iOS). `ios/` and `android/` are CNG-generated — never edit them by hand.
