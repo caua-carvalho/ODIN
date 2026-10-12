@@ -15,7 +15,7 @@ const GLOBAL_SHORTCUTS: ShortcutRow[] = [
   { keys: ['Ctrl', 'K'], desc: 'Open the command palette' },
   { keys: ['Ctrl', 'B'], desc: 'Toggle the navigation menu' },
   { keys: ['?'], desc: 'Show this shortcuts help' },
-  { keys: ['1–6'], desc: 'Jump to Dashboard, Chat, Tools, Skills, Permissions or System' },
+  { keys: ['1–7'], desc: 'Jump to Dashboard, Chat, Projects, Tools, Skills, Permissions or System' },
   { keys: ['Esc'], desc: 'Close menus, dialogs and the command palette' },
 ];
 

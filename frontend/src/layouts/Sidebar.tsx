@@ -9,6 +9,7 @@ import {
   Settings,
   Shield,
   HardDrive,
+  FolderKanban,
 } from 'lucide-react';
 import type { HealthResponse } from '../types/health';
 
@@ -24,6 +25,7 @@ interface SidebarProps {
 const navigation = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'projects', label: 'Projetos', icon: FolderKanban },
   { id: 'tools', label: 'Tools', icon: Wrench },
   { id: 'skills', label: 'Skills', icon: Settings },
   { id: 'permissions', label: 'Permissions', icon: Shield },
