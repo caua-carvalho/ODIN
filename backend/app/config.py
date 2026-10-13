@@ -2,10 +2,21 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 from functools import lru_cache
 
+# Repository root (…/odin). Used to locate the .env regardless of the current
+# working directory the server happens to be started from.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _default_workspace() -> str:
+    """Portable default workspace next to the user's home directory."""
+    return str(Path.home() / "odin-workspace")
+
 
 class Settings(BaseSettings):
-    # Workspace
-    odin_workspace: str = "/home/caua/odin-workspace"
+    # Workspace - Odin has full autonomy inside this directory. Defaults to
+    # ~/odin-workspace so the project is not tied to a specific developer's
+    # absolute path; override with ODIN_WORKSPACE in .env.
+    odin_workspace: str = _default_workspace()
 
     # Server
     odin_host: str = "127.0.0.1"
@@ -45,7 +56,8 @@ class Settings(BaseSettings):
     odin_weather_lat: float = -23.1794
     odin_weather_lon: float = -45.8869
     # Comma-separated list of repository paths to summarise in the briefing.
-    odin_briefing_repos: str = "/home/caua/odin,/home/caua/odin-workspace"
+    # Empty by default so the app is portable; set ODIN_BRIEFING_REPOS in .env.
+    odin_briefing_repos: str = ""
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./odin.db"
@@ -55,11 +67,19 @@ class Settings(BaseSettings):
     # before exposing Odin to the LAN/internet (e.g. for the mobile app or a
     # remote ODIN_HOST). The mobile client stores it in its settings screen.
     odin_api_token: str = ""
+    # Failed-token attempts allowed per client (window below) before the API
+    # answers 429. Only counts failures; a correct token resets the counter.
+    odin_auth_max_failures: int = 10
+    odin_auth_window_seconds: int = 60
 
     # Debug
     debug: bool = False
 
-    model_config = {"env_file": "../.env", "extra": "ignore"}
+    model_config = {
+        # Absolute path: the server works from any working directory.
+        "env_file": str(REPO_ROOT / ".env"),
+        "extra": "ignore",
+    }
 
     @property
     def workspace_path(self) -> Path:

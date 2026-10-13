@@ -180,6 +180,24 @@ class TestCommandPolicy:
         assert decision.level == AccessLevel.REQUIRE_APPROVAL
         assert decision.risk_level.value == "high"
 
+    def test_rm_requires_approval(self, policy):
+        """Destructive local commands are no longer auto-allowed in the workspace."""
+        decision = policy.check_command("rm -rf build")
+        assert decision.level == AccessLevel.REQUIRE_APPROVAL
+
+    def test_chmod_requires_approval(self, policy):
+        assert policy.check_command("chmod 777 file").level == AccessLevel.REQUIRE_APPROVAL
+
+    def test_ssh_requires_approval(self, policy):
+        assert policy.check_command("ssh user@host").level == AccessLevel.REQUIRE_APPROVAL
+
+    def test_curl_requires_approval(self, policy):
+        assert policy.check_command("curl http://x").level == AccessLevel.REQUIRE_APPROVAL
+
+    def test_benign_dev_commands_still_allowed(self, policy):
+        for cmd in ["git status", "cp a b", "mv a b", "mkdir dir", "cat x"]:
+            assert policy.check_command(cmd).level == AccessLevel.ALLOW, cmd
+
     def test_systemctl_requires_approval(self, policy):
         decision = policy.check_command("systemctl start nginx")
         assert decision.level == AccessLevel.REQUIRE_APPROVAL

@@ -1,0 +1,18 @@
+# Example ~/.cloudflared/config.yml for a named Odin tunnel.
+#
+# After `cloudflared tunnel create odin`, replace <UUID> with the tunnel UUID
+# and <user> with your username. Then:
+#   sudo cloudflared service install
+#   sudo systemctl enable --now cloudflared
+#
+# See README.deploy.md for the full walkthrough.
+
+tunnel: <UUID>
+credentials-file: /home/<user>/.cloudflared/<UUID>.json
+
+ingress:
+  # Public hostname -> the loopback-bound Odin backend.
+  - hostname: odin.seudominio.com
+    service: http://127.0.0.1:8000
+  # Everything else is a 404 (required catch-all).
+  - service: http_status:404

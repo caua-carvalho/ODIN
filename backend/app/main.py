@@ -18,7 +18,7 @@ from app.tools.shell.tools import ExecuteCommandTool
 from app.tools.projects.tools import create_project_tools
 from app.security.path_guard import PathGuard
 from app.security.policy import SecurityPolicy
-from app.security.auth import TokenAuthMiddleware
+from app.security.auth import TokenAuthMiddleware, _FailureLimiter
 from app.api.websocket import ws_manager
 
 # Configure logging
@@ -32,6 +32,28 @@ logger = logging.getLogger("odin.main")
 tool_registry: ToolRegistry = ToolRegistry()
 odin_agent: OdinAgent | None = None
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _enforce_exposure_guard() -> None:
+    """Refuse to start a non-loopback bind that has no API token.
+
+    Odin can run arbitrary shell commands and read/write files, so binding it
+    to a network interface without authentication is equivalent to handing out
+    remote code execution. A loopback bind is safe because only the local
+    Cloudflare tunnel / reverse proxy can reach it.
+    """
+    host = (settings.odin_host or "").strip()
+    if host in _LOOPBACK_HOSTS or settings.odin_api_token:
+        return
+    raise RuntimeError(
+        f"Refusing to start: ODIN_HOST={host!r} is not loopback and "
+        "ODIN_API_TOKEN is empty. Exposing Odin without a token lets anyone on "
+        "the network run shell commands and access your files. Set a strong "
+        "token (e.g. `openssl rand -hex 32`) in .env, or bind to 127.0.0.1 and "
+        "expose it through a Cloudflare tunnel (see README.deploy.md)."
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,6 +61,9 @@ async def lifespan(app: FastAPI):
     global odin_agent
 
     logger.info("Starting Odin...")
+
+    # Fail fast on an unsafe public bind before doing anything else.
+    _enforce_exposure_guard()
 
     # Ensure workspace exists
     workspace_path = Path(settings.odin_workspace)
@@ -94,7 +119,11 @@ app = FastAPI(
 # last and stays the outermost layer — it must answer preflight OPTIONS
 # requests (which carry no Authorization header) before the auth gate runs.
 if settings.odin_api_token:
-    app.add_middleware(TokenAuthMiddleware, token=settings.odin_api_token)
+    _auth_limiter = _FailureLimiter(
+        max_failures=settings.odin_auth_max_failures,
+        window_seconds=settings.odin_auth_window_seconds,
+    )
+    app.add_middleware(TokenAuthMiddleware, token=settings.odin_api_token, limiter=_auth_limiter)
     logger.info("API token authentication enabled (ODIN_API_TOKEN set)")
 
 # CORS

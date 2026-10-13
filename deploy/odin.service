@@ -1,0 +1,31 @@
+# Odin backend + web panel as a systemd system service.
+#
+# Rendered and installed by scripts/install-service.sh — do not copy by hand
+# unless you replace the __PLACEHOLDERS__ yourself.
+#
+# The server binds to 127.0.0.1; the Cloudflare tunnel (see README.deploy.md)
+# is what makes it reachable from the internet, so no inbound port is opened.
+
+[Unit]
+Description=Odin Personal AI Assistant (backend + web panel)
+Documentation=file://__ODIN_ROOT__/README.deploy.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__ODIN_USER__
+Group=__ODIN_USER__
+WorkingDirectory=__ODIN_ROOT__/backend
+EnvironmentFile=__ODIN_ROOT__/.env
+ExecStart=__ODIN_ROOT__/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+# Give the agent room to write in its workspace but keep it out of the rest of
+# the filesystem where possible.
+NoNewPrivileges=true
+PrivateTmp=true
+ReadWritePaths=__ODIN_ROOT__ __ODIN_WORKSPACE__
+
+[Install]
+WantedBy=multi-user.target

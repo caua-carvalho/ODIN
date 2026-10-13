@@ -42,15 +42,30 @@ PACKAGE_MANAGERS = frozenset({"pacman", "apt", "apt-get", "dnf", "yum", "snap", 
 SYSTEM_SERVICES = frozenset({"systemctl", "service", "journalctl", "crontab", "rc-service"})
 HIGH_RISK_DESTRUCTIVE = frozenset({"mkfs", "fdisk", "parted", "dd", "shred", "wipefs"})
 
+# Destructive local operations. These used to run without approval whenever the
+# target was inside the workspace; when Odin is reachable over the network that
+# is too much trust, so they now always require explicit approval.
+DESTRUCTIVE_EXECUTABLES = frozenset({
+    "rm", "rmdir", "chmod", "chown", "chgrp", "truncate",
+})
+
+# Remote-shell / file-transfer tools — enable lateral movement and exfiltration.
+REMOTE_EXECUTABLES = frozenset({
+    "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet",
+})
+
+# Outbound fetchers that can pull and pipe arbitrary payloads.
+NETWORK_EXECUTABLES = frozenset({"curl", "wget"})
+
 # Executables allowed without approval when working in workspace
 SAFE_DEV_EXECUTABLES = frozenset({
     "git", "python", "python3", "node", "npm", "npx", "yarn", "pnpm",
     "pytest", "cargo", "go", "make", "gcc", "g++", "clang", "rustc",
     "ls", "cat", "grep", "find", "awk", "sed", "head", "tail", "wc",
-    "echo", "pwd", "env", "which", "whoami", "date", "curl", "wget",
+    "echo", "pwd", "env", "which", "whoami", "date",
     "jq", "tree", "du", "df", "uname", "ps", "top", "htop", "free",
-    "tar", "zip", "unzip", "gzip", "gunzip", "ssh", "scp", "rsync",
-    "mkdir", "touch", "cp", "mv", "rm", "chmod", "chown",
+    "tar", "zip", "unzip", "gzip", "gunzip",
+    "mkdir", "touch", "cp", "mv",
 })
 
 
@@ -140,6 +155,27 @@ class SecurityPolicy:
                 AccessLevel.REQUIRE_APPROVAL,
                 f"System service command '{executable}' requires authorization",
                 RiskLevel.HIGH,
+            )
+
+        if executable in REMOTE_EXECUTABLES:
+            return PolicyDecision(
+                AccessLevel.REQUIRE_APPROVAL,
+                f"Remote/transfer command '{executable}' requires authorization",
+                RiskLevel.HIGH,
+            )
+
+        if executable in DESTRUCTIVE_EXECUTABLES:
+            return PolicyDecision(
+                AccessLevel.REQUIRE_APPROVAL,
+                f"Destructive command '{executable}' requires authorization",
+                RiskLevel.MEDIUM,
+            )
+
+        if executable in NETWORK_EXECUTABLES:
+            return PolicyDecision(
+                AccessLevel.REQUIRE_APPROVAL,
+                f"Network fetch command '{executable}' requires authorization",
+                RiskLevel.MEDIUM,
             )
 
         # Allow common dev tools
