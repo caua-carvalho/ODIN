@@ -138,7 +138,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence
@@ -152,7 +152,9 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/health` | Returns status, model_provider, model, workspace, tools_count, agent_ready |
+| `GET /api/health` | Returns status, model_provider, model, workspace, tools_count, agent_ready, auth_required (public) |
+| `POST /api/auth/login` | Log in with `{"token": "<ODIN_API_TOKEN>", "remember": true}`; returns a signed session token (public) |
+| `GET /api/auth/session` | Describe the presented credential (`method`, `expires_at`); requires auth |
 | `GET /api/ws/{conv_id}` | WebSocket chat endpoint (stream events: text_chunk, tool_start, tool_end, done, error) |
 | `GET /api/conversations` | List conversations |
 | `POST /api/conversations` | Create a new conversation (⚠️ **no trailing slash** — `POST /api/conversations/` returns 405) |
@@ -222,14 +224,18 @@ Key facts:
 
 4. **Permission flow**: When the agent tries a WRITE/DELETE/MOVE/EXECUTE outside the workspace, it yields a `permission_request` event. The UI must call `/api/permissions/{id}/approve` or `/api/permissions/{id}/deny` to unblock the agent.
 
+   > **The approval UI only appears if the agent actually calls the tool.** The tools create the DB row and broadcast `permission_request` from *inside* `_request_permission`. If the LLM instead asks the user for permission in prose ("I need your authorization — shall I proceed?"), no request exists, so the web/mobile Approve/Deny buttons never render. This is why the system prompt (`agent/prompts/system.py`) and the tool descriptions spell out that the model must **invoke the tool directly and never ask for confirmation in chat** — do not reword them back to "state the reason when requesting approval". Guarded by `tests/test_prompts.py::test_system_prompt_keeps_hitl_contract`.
+
 5. **WebSocket chat** (`api/routes/chat.py`) is the real-time streaming endpoint. Clients send `{"type": "message", "content": "..."}` and receive events including `tool_start`/`tool_end`. The agent's `chat()` method yields these events.
 
 ## Authentication (optional, for LAN / mobile)
 
-- `ODIN_API_TOKEN` (empty by default = **disabled**) adds a bearer-token gate to the API. When set, every `/api/*` request must send `Authorization: Bearer <token>`; `/api/health` is exempt (clients probe it to test connectivity). WebSocket clients that cannot set headers pass `?token=<token>` on `/api/ws/{id}` instead.
+- `ODIN_API_TOKEN` (empty by default = **disabled**) adds a bearer-token gate to the API. When set, every `/api/*` request must send `Authorization: Bearer <token>`; `/api/health` and `POST /api/auth/login` are exempt. WebSocket clients that cannot set headers pass `?token=<token>` on `/api/ws/{id}` instead.
+- **Web panel login**: the panel exchanges `ODIN_API_TOKEN` for a signed, expiring **session token** via `POST /api/auth/login` (`{"token": "...", "remember": true}`), so the raw token never lives in `localStorage`. Session tokens are HMAC-SHA256 signed (`backend/app/security/session.py`, stdlib only — no PyJWT, no server-side store) and are accepted anywhere the raw token is. TTL: `ODIN_SESSION_TTL_DAYS` (7) with "remember me", else `ODIN_SESSION_TTL_HOURS` (12). Signing secret = `ODIN_SESSION_SECRET` or, if empty, `ODIN_API_TOKEN` (rotating it invalidates all sessions). `GET /api/auth/session` reports the presented credential; `/api/health` exposes `auth_required` so the frontend knows whether to show the login screen.
+- Frontend: gate lives in `frontend/src/App.tsx` (`AuthGate`), state in `frontend/src/auth/AuthContext.tsx`, UI in `frontend/src/pages/LoginPage.tsx`, storage in `frontend/src/api/session.ts`. A `401` (or WebSocket close `1008`) dispatches `odin:unauthorized` and drops the panel back to the login screen. The legacy `localStorage['odin_api_token']` still works as a fallback credential.
 - **The exposure guard makes the token effectively mandatory for any non-loopback bind**: `main.py` refuses to start if `ODIN_HOST` is not loopback and the token is empty. So for a LAN bind (`ODIN_HOST=0.0.0.0`) or a public host you *must* set `ODIN_API_TOKEN`. For the recommended hosting setup the backend stays on `127.0.0.1` and the token is still set as defense in depth (see `README.deploy.md`).
-- Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, constant-time compare, plus a `_FailureLimiter` that returns `429` after repeated wrong tokens). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
-- Clients: the mobile app stores the token in its Connect/Settings screen; the web panel reads `localStorage['odin_api_token']` (set it in the browser console).
+- Implemented in `backend/app/security/auth.py` (`TokenAuthMiddleware`, `PUBLIC_PATHS`, constant-time compare, plus a `_FailureLimiter` that returns `429` after repeated wrong tokens — the login route runs its own limiter since it is public). It is registered **before** `CORSMiddleware` in `main.py` on purpose: Starlette makes the **last**-added middleware the outermost, so CORS stays outside the gate and answers preflight `OPTIONS` without an `Authorization` header (adding auth *after* CORS is the bug — the preflight would 401).
+- Clients: the mobile app stores the raw token in its Connect/Settings screen; the web panel stores the session token (`odin_session` in `localStorage`) and only sends the raw token once, at login.
 - Reaching the backend from a phone on the LAN requires `ODIN_HOST=0.0.0.0` — pair it with a token (or, preferably, use a Cloudflare tunnel and keep it loopback).
 - `scripts/server.sh` (used by `odin start/restart`) reads `ODIN_HOST`/`ODIN_PORT` **from the repo `.env`** (falling back to an exported shell var, then `127.0.0.1:8000`). So setting `ODIN_HOST=0.0.0.0` in `.env` and running `odin restart` is enough — no manual `export` needed.
 - **CORS is only a browser concern** (Vite web panel, Expo **web**). Native Expo Go does not enforce it; its failure mode is `java.net.ConnectException ... 127.0.0.1:8000`, which means the app is still pointing at `127.0.0.1` instead of the machine's LAN IP (`hostname -I`). Set the app's server URL to `http://<lan-ip>:8000`. The allowed origins/regex live in `settings.odin_cors_origins` / `odin_cors_origin_regex` (`main.py`); the defaults include `:3000` (Vite) and `:8081` (Expo web) plus any private-LAN origin.
