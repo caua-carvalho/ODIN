@@ -16,6 +16,12 @@
 # Local-first by design: Mem0's extraction LLM and embedder both point at
 # OLLAMA_BASE_URL, and the vector store is embedded (default Chroma), so there
 # is no server and no marginal API cost.
+#
+# CPU-only machines: Mem0's extraction prompt is ~7.4k tokens, so local
+# extraction is slow. Either point the extraction LLM at a hosted provider
+# (ODIN_MEMORY_LLM_PROVIDER=groq|openai|anthropic|gemini — install that
+# provider's SDK, e.g. `pip install groq`), or skip extraction entirely with
+# ODIN_MEMORY_INFER=false (raw turns + embedding recall, fully offline).
 
 mem0ai>=0.1.100
 chromadb>=0.5.0

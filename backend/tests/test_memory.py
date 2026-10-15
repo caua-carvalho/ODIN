@@ -34,6 +34,7 @@ from app.agent.memory import create_memory_service
 from app.agent.memory.service import (
     MemoryService,
     _build_mem0_config,
+    _disable_thinking,
     _extract_memory_texts,
     format_memory_context,
 )
@@ -241,6 +242,196 @@ class TestMem0Config:
         assert config["embedder"]["provider"] == "ollama"
         assert config["embedder"]["config"]["model"] == "nomic-embed-text"
         assert config["vector_store"]["provider"] == "chroma"
+
+    def test_remote_provider_uses_matching_api_key(self):
+        s = Settings(
+            odin_memory_enabled=True,
+            odin_memory_llm_provider="groq",
+            odin_memory_llm_model="openai/gpt-oss-120b",
+            groq_api_key="gsk-test",
+            _env_file=None,
+        )
+        llm = _build_mem0_config(s)["llm"]
+        assert llm["provider"] == "groq"
+        assert llm["config"]["model"] == "openai/gpt-oss-120b"
+        assert llm["config"]["api_key"] == "gsk-test"
+        assert llm["config"]["max_tokens"] == s.odin_memory_llm_max_tokens
+        # The embedder stays local regardless of the LLM provider.
+        assert _build_mem0_config(s)["embedder"]["provider"] == "ollama"
+
+    def test_remote_provider_without_key_omits_api_key(self):
+        s = Settings(
+            odin_memory_enabled=True,
+            odin_memory_llm_provider="openai",
+            odin_memory_llm_model="gpt-4o-mini",
+            openai_api_key="",
+            _env_file=None,
+        )
+        llm = _build_mem0_config(s)["llm"]
+        assert llm["provider"] == "openai"
+        assert "api_key" not in llm["config"]
+
+
+class TestMem0ApiAdaptation:
+    """Mem0 2.x moved entities into ``filters`` and renamed ``limit`` to ``top_k``.
+
+    The backend introspects the installed API so both shapes work. These tests
+    use fake clients (no mem0 import, no network).
+    """
+
+    def _backend_with(self, client):
+        backend = object.__new__(service_mod.Mem0Backend)
+        backend._memory = client
+        return backend
+
+    def test_new_api_uses_filters_and_top_k(self):
+        class _NewMemory:
+            def search(self, query, *, top_k=20, filters=None, **kwargs):
+                return {}
+
+            def add(self, messages, *, user_id=None, metadata=None):
+                return None
+
+        backend = self._backend_with(_NewMemory())
+        assert backend._search_kwargs("odin", 5) == {
+            "filters": {"user_id": "odin"},
+            "top_k": 5,
+        }
+        assert backend._add_kwargs("odin") == {"user_id": "odin"}
+
+    def test_legacy_api_uses_user_id_and_limit(self):
+        class _OldMemory:
+            def search(self, query, *, user_id=None, limit=100):
+                return {}
+
+            def add(self, messages, *, filters=None):
+                return None
+
+        backend = self._backend_with(_OldMemory())
+        assert backend._search_kwargs("odin", 5) == {"user_id": "odin", "limit": 5}
+        assert backend._add_kwargs("odin") == {"filters": {"user_id": "odin"}}
+
+    def test_infer_flag_is_forwarded_when_supported(self):
+        class _Memory:
+            def search(self, query, *, filters=None, top_k=20):
+                return {}
+
+            def add(self, messages, *, user_id=None, infer=True):
+                return None
+
+        backend = self._backend_with(_Memory())
+        backend._infer = False
+        assert backend._add_kwargs("odin") == {"user_id": "odin", "infer": False}
+
+    def test_infer_defaults_to_true_on_the_class(self):
+        from app.agent.memory.service import Mem0Backend
+
+        assert Mem0Backend._infer is True
+
+
+class TestDisableThinking:
+    """Reasoning models must not burn the JSON budget on hidden reasoning.
+
+    ``_disable_thinking`` wraps Mem0's Ollama client so ``think=False`` is always
+    sent. These tests use a fake client (no mem0, no network).
+    """
+
+    def test_injects_think_false_when_supported(self):
+        seen = {}
+
+        class _Client:
+            def chat(self, model, messages, *, think=None, format=None, options=None):
+                seen["think"] = think
+                return {"message": {"content": "{}"}}
+
+            def chat_sig_marker(self):
+                pass
+
+        class _Llm:
+            client = _Client()
+
+        class _Memory:
+            llm = _Llm()
+
+        memory = _Memory()
+        _disable_thinking(memory)
+        memory.llm.client.chat("m", [{"role": "user", "content": "hi"}])
+        assert seen["think"] is False
+
+    def test_explicit_think_is_respected(self):
+        seen = {}
+
+        class _Client:
+            def chat(self, model, messages, *, think=None):
+                seen["think"] = think
+                return {}
+
+        class _Memory:
+            class llm:  # type: ignore[no-redef]
+                client = _Client()
+
+        memory = _Memory()
+        _disable_thinking(memory)
+        memory.llm.client.chat("m", [], think=True)
+        assert seen["think"] is True
+
+    def test_client_without_think_is_left_untouched(self):
+        class _Client:
+            def chat(self, model, messages):
+                return "ok"
+
+        client = _Client()
+        original = client.chat
+
+        class _Memory:
+            class llm:  # type: ignore[no-redef]
+                pass
+
+        memory = _Memory()
+        memory.llm.client = client
+        _disable_thinking(memory)
+        assert memory.llm.client.chat == original
+        assert memory.llm.client.chat("m", []) == "ok"
+
+    def test_missing_llm_is_a_noop(self):
+        class _Memory:
+            pass
+
+        _disable_thinking(_Memory())  # must not raise
+
+    def test_num_ctx_is_merged_into_options(self):
+        seen = {}
+
+        class _Client:
+            def chat(self, model, messages, *, think=None, options=None):
+                seen["options"] = options
+                return {}
+
+        class _Memory:
+            class llm:  # type: ignore[no-redef]
+                client = _Client()
+
+        memory = _Memory()
+        _disable_thinking(memory, num_ctx=16384)
+        memory.llm.client.chat("m", [], options={"temperature": 0.1})
+        assert seen["options"] == {"temperature": 0.1, "num_ctx": 16384}
+
+    def test_num_ctx_does_not_override_existing_value(self):
+        seen = {}
+
+        class _Client:
+            def chat(self, model, messages, *, think=None, options=None):
+                seen["options"] = options
+                return {}
+
+        class _Memory:
+            class llm:  # type: ignore[no-redef]
+                client = _Client()
+
+        memory = _Memory()
+        _disable_thinking(memory, num_ctx=16384)
+        memory.llm.client.chat("m", [], options={"num_ctx": 4096})
+        assert seen["options"]["num_ctx"] == 4096
 
 
 # ---------------------------------------------------------------------------

@@ -59,6 +59,24 @@ class Settings(BaseSettings):
     # feature local-first and cost-free). The base URL reuses OLLAMA_BASE_URL.
     odin_memory_llm_model: str = "qwen3:0.6b"
     odin_memory_embedder_model: str = "nomic-embed-text"
+    # Provider for Mem0's extraction LLM. Defaults to local Ollama (private,
+    # offline, zero-cost) but any Mem0 provider works — e.g. "groq" is far
+    # faster on CPU-only machines (Mem0's extraction prompt is ~8.5k tokens).
+    # The matching <PROVIDER>_API_KEY setting is used automatically.
+    odin_memory_llm_provider: str = "ollama"
+    # Max output tokens for the extraction LLM. Extraction emits only a small
+    # JSON blob, so a low cap keeps requests small — this matters on hosted
+    # free tiers, where the (large) prompt plus a 2000-token reservation can
+    # exceed a per-minute token limit.
+    odin_memory_llm_max_tokens: int = 1024
+    # When false, Mem0 stores the raw conversation turns instead of running its
+    # (heavy, ~7.4k-token) extraction LLM; recall is then pure embedding
+    # similarity. Use this on CPU-only machines where extraction is impractical.
+    odin_memory_infer: bool = True
+    # Context window for Mem0's Ollama extraction LLM. Mem0's V3 extraction
+    # prompt is ~8.5k tokens, well beyond Ollama's 4096 default; if it is not
+    # raised the prompt is truncated and Mem0 silently extracts nothing.
+    odin_memory_num_ctx: int = 16384
     # Embedded vector store backend (no server). "chroma" by default; any store
     # Mem0 supports (e.g. "qdrant") can be set here. Empty path = Mem0 default.
     odin_memory_vector_store: str = "chroma"

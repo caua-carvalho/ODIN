@@ -12,6 +12,15 @@ The facade delegates to a :class:`MemoryBackend`. The default backend is Mem0
 embedder both point at the user's Ollama, and the vector store is embedded on
 disk (Chroma by default) — no server, no API keys, zero marginal cost.
 
+Two escape hatches exist for machines where the extraction LLM is a problem
+(Mem0's V3 prompt is ~7.4k tokens):
+
+- ``ODIN_MEMORY_LLM_PROVIDER`` can point the extraction LLM at a hosted
+  provider (``groq``/``openai``/``anthropic``/``gemini``); the embedder stays
+  local;
+- ``ODIN_MEMORY_INFER=false`` skips extraction entirely — Mem0 then stores the
+  raw turns and recall is pure embedding similarity (fully offline, instant).
+
 Why Mem0 and not sqlite-vec
 ---------------------------
 Mem0 gives fact extraction, dedup and update for free (it runs the LLM once per
@@ -34,6 +43,7 @@ memory: it is never mandatory on the critical path.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import Any, Protocol, runtime_checkable
 
@@ -134,32 +144,108 @@ class Mem0Backend:
     every call is offloaded to a thread to keep the event loop responsive.
     """
 
+    # Whether Mem0 runs its extraction LLM on write. Overridden from settings;
+    # the class default keeps ``object.__new__`` test doubles working.
+    _infer: bool = True
+
     def __init__(self, settings: Settings) -> None:
         from mem0 import Memory  # lazy, heavy, optional dependency
 
         config = _build_mem0_config(settings)
         logger.info(
             "Initialising Mem0 memory "
-            f"(llm={settings.odin_memory_llm_model}, "
+            f"(llm={settings.odin_memory_llm_provider}:{settings.odin_memory_llm_model}, "
             f"embedder={settings.odin_memory_embedder_model}, "
             f"store={settings.odin_memory_vector_store})"
         )
         self._memory = Memory.from_config(config)
+        self._infer = settings.odin_memory_infer
+        if (settings.odin_memory_llm_provider or "ollama").strip().lower() == "ollama":
+            _disable_thinking(self._memory, num_ctx=settings.odin_memory_num_ctx)
 
     async def search(
         self, query: str, *, user_id: str = "odin", limit: int = 5
     ) -> list[dict]:
-        result = await asyncio.to_thread(
-            self._memory.search, query, user_id=user_id, limit=limit
-        )
+        kwargs = self._search_kwargs(user_id, limit)
+        result = await asyncio.to_thread(self._memory.search, query, **kwargs)
         return _as_records(result)
 
     async def add(self, messages: list[dict], *, user_id: str = "odin") -> None:
-        await asyncio.to_thread(self._memory.add, messages, user_id=user_id)
+        kwargs = self._add_kwargs(user_id)
+        await asyncio.to_thread(self._memory.add, messages, **kwargs)
+
+    def _search_kwargs(self, user_id: str, limit: int) -> dict:
+        """Build search kwargs for the installed Mem0's API.
+
+        Mem0 2.x moved the entity to ``filters={"user_id": ...}`` and renamed the
+        result cap to ``top_k``; older versions take ``user_id``/``limit`` as
+        top-level kwargs. Introspect once and adapt (the extra kwargs land in
+        ``**kwargs`` on 2.x and would otherwise be silently ignored).
+        """
+        params = inspect.signature(self._memory.search).parameters
+        if "filters" in params:
+            return {"filters": {"user_id": user_id}, "top_k": limit}
+        return {"user_id": user_id, "limit": limit}
+
+    def _add_kwargs(self, user_id: str) -> dict:
+        params = inspect.signature(self._memory.add).parameters
+        if "user_id" in params:
+            kwargs: dict = {"user_id": user_id}
+        else:
+            kwargs = {"filters": {"user_id": user_id}}
+        if "infer" in params:
+            kwargs["infer"] = self._infer
+        return kwargs
+
+
+def _disable_thinking(memory: Any, *, num_ctx: int | None = None) -> None:
+    """Configure Mem0's Ollama LLM for reliable, fast structured extraction.
+
+    Mem0's ``OllamaLLM.generate_response`` passes neither Ollama's ``think`` flag
+    nor a ``num_ctx``. Two problems follow:
+
+    - Reasoning models (e.g. ``qwen3``) spend the whole ``num_predict`` budget on
+      hidden reasoning and never emit the JSON contract Mem0 parses — extraction
+      comes back empty and **nothing is stored, silently**.
+    - Mem0's V3 extraction prompt is ~34k chars (~8.5k tokens), far beyond
+      Ollama's default 4096-token context; the prompt is truncated and the model
+      extracts nothing.
+
+    This wrapper forces ``think=False`` and raises ``num_ctx`` when the installed
+    ``ollama`` client supports them (older clients are left untouched).
+    """
+    client = getattr(getattr(memory, "llm", None), "client", None)
+    chat = getattr(client, "chat", None)
+    if chat is None:
+        return
+    try:
+        params = inspect.signature(chat).parameters
+    except (TypeError, ValueError):
+        return
+    supports_think = "think" in params
+    if not supports_think and num_ctx is None:
+        return
+
+    def chat_configured(*args: Any, **kwargs: Any) -> Any:
+        if supports_think:
+            kwargs.setdefault("think", False)
+        if num_ctx is not None:
+            options = dict(kwargs.get("options") or {})
+            options.setdefault("num_ctx", num_ctx)
+            kwargs["options"] = options
+        return chat(*args, **kwargs)
+
+    client.chat = chat_configured
 
 
 def _build_mem0_config(settings: Settings) -> dict:
-    """Assemble the Mem0 config dict: local Ollama + embedded vector store."""
+    """Assemble the Mem0 config dict: extraction LLM + embedded vector store.
+
+    The embedder is always the local Ollama embedder (fast on CPU, no API key).
+    The extraction LLM defaults to local Ollama but any Mem0 provider can be
+    selected via ``ODIN_MEMORY_LLM_PROVIDER`` — the matching ``*_API_KEY``
+    setting is picked up automatically.
+    """
     vector_store = {
         "provider": settings.odin_memory_vector_store,
         "config": {"collection_name": "odin_memories"},
@@ -168,13 +254,7 @@ def _build_mem0_config(settings: Settings) -> dict:
         vector_store["config"]["path"] = settings.odin_memory_path
 
     return {
-        "llm": {
-            "provider": "ollama",
-            "config": {
-                "model": settings.odin_memory_llm_model,
-                "ollama_base_url": settings.ollama_base_url,
-            },
-        },
+        "llm": _build_llm_config(settings),
         "embedder": {
             "provider": "ollama",
             "config": {
@@ -184,6 +264,40 @@ def _build_mem0_config(settings: Settings) -> dict:
         },
         "vector_store": vector_store,
     }
+
+
+# Mem0 LLM provider -> the Settings field holding its API key.
+_MEMORY_API_KEY_FIELDS = {
+    "groq": "groq_api_key",
+    "openai": "openai_api_key",
+    "anthropic": "anthropic_api_key",
+    "gemini": "gemini_api_key",
+}
+
+
+def _build_llm_config(settings: Settings) -> dict:
+    """Build Mem0's ``llm`` config for the configured provider."""
+    provider = (settings.odin_memory_llm_provider or "ollama").strip().lower()
+    if provider == "ollama":
+        return {
+            "provider": "ollama",
+            "config": {
+                "model": settings.odin_memory_llm_model,
+                "ollama_base_url": settings.ollama_base_url,
+                "max_tokens": settings.odin_memory_llm_max_tokens,
+            },
+        }
+
+    config: dict[str, Any] = {
+        "model": settings.odin_memory_llm_model,
+        "max_tokens": settings.odin_memory_llm_max_tokens,
+    }
+    key_field = _MEMORY_API_KEY_FIELDS.get(provider)
+    if key_field:
+        api_key = getattr(settings, key_field, "")
+        if api_key:
+            config["api_key"] = api_key
+    return {"provider": provider, "config": config}
 
 
 def create_memory_service(settings: Settings) -> MemoryService | None:
