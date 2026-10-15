@@ -8,6 +8,9 @@ python-dotenv==1.2.4
 python-multipart==0.0.20
 google-genai==2.28.0
 litellm==1.105.1
+# Optional MCP SDK — imported lazily; Odin boots without it when no MCP servers
+# are configured.
+mcp==2.3.0
 psutil==7.2.2
 pytest==9.1.1
 pytest-asyncio==1.4.0

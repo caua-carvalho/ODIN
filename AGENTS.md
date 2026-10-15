@@ -159,6 +159,43 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 
 > **Signal**: The health endpoint (`/api/health`) reports `"tools_count": <n>`. If this is 0, no tools were registered, and the agent cannot perform any actions.
 
+## MCP servers
+
+External [MCP](https://modelcontextprotocol.io) servers can be plugged in to add
+tools without hand-coding them. The SDK (`mcp==2.3.0`) is **optional and lazily
+imported**; with no servers configured (or the package absent) Odin boots exactly
+as before, and `MCPManager.start()` is a no-op.
+
+- Config: `ODIN_MCP_SERVERS` in `.env` — a JSON array of server objects
+  (`name`, `transport` = `stdio`|`sse`|`http`, plus `command`/`args`/`env` for
+  stdio or `url`/`headers` for remote, and `trusted`). Parsing is tolerant:
+  invalid entries are logged and skipped so a config typo can never stop boot.
+  See `.env.example` for examples.
+- Code: `backend/app/agent/mcp/` — `config.py` (parse/validate),
+  `manager.py` (connections + discovery + lifecycle), `tool.py`
+  (`McpToolInfo`, `McpToolAdapter`, `create_mcp_tools`). It is registered in the
+  `main.py` lifespan *after* the native tools (`await mcp_manager.start()` then
+  `tool_registry.register(...)` for each discovered tool); `mcp_manager.stop()`
+  runs on shutdown. `/api/mcp` reports the live status.
+- Each server runs in a **dedicated asyncio task** that owns its transport and
+  `ClientSession` for the whole process (tool calls are funnelled through a
+  queue). Entering/closing the anyio context managers in a *single* task is
+  required — doing so across tasks raises "Attempted to exit cancel scope in a
+  different task". Startup waits up to `ODIN_MCP_STARTUP_TIMEOUT` (default 8s)
+  per server, then continues.
+
+> **SECURITY INVARIANT — do not weaken**: MCP tools execute in an **external
+> process that `PathGuard` cannot inspect**, so every MCP tool call requires
+> explicit user approval by default (the same `permission_requests` row +
+> `permission_request` WebSocket event + `permission_manager.request_approval`
+> flow as `execute_command`). Only servers marked `"trusted": true` in
+> `ODIN_MCP_SERVERS` skip that blanket approval — and even then, any declared
+> path-like argument is still classified by the shared `SecurityPolicy`, so the
+> workspace boundary holds. `McpToolAdapter` assumes `OperationType.EXECUTE`
+> unless the MCP tool advertises `readOnlyHint`. Tool names are namespaced
+> `mcp__<server>__<tool>` so they cannot collide with native tools. Guarded by
+> `backend/tests/test_mcp.py`.
+
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
@@ -193,7 +230,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `GET /api/skills` | List skill groupings (Filesystem, Development, System, ...) over registered tools |
 | `GET /api/providers` | List LLM providers (availability + models) and the active selection |
 | `POST /api/providers/select` | Switch the active provider/model at runtime (body: `{"provider": "...", "model": "..."}`) |
-| `GET /api/mcp` | Mocked MCP servers (not implemented in MVP) |
+| `GET /api/mcp` | Live status of configured MCP servers (connected/error + `tool_count`, `transport`, `trusted`) |
 | `GET /api/permissions` | List all permission requests |
 | `GET /api/permissions/pending` | List pending permission requests |
 | `POST /api/permissions/{id}/approve` | Approve a permission request |

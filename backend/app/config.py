@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # responses/tool calls with thinking enabled, so the default is false.
     ollama_think: bool = False
 
+    # MCP servers. A JSON array describing external Model Context Protocol
+    # servers whose tools should be exposed to the agent (see .env.example).
+    # Empty (the default) means MCP is disabled and Odin boots exactly as
+    # before. Parsing is tolerant: invalid entries are logged and skipped.
+    odin_mcp_servers: str = ""
+    # How long to wait for a configured server to connect during startup before
+    # giving up on it (the rest of boot never blocks on MCP).
+    odin_mcp_startup_timeout: float = 8.0
+
     # Daily briefing
     odin_weather_city: str = "São José dos Campos"
     odin_weather_lat: float = -23.1794
