@@ -1,9 +1,12 @@
 import { memo, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Check, Copy } from 'lucide-react-native';
 import { cn } from '../../lib/utils';
 import { highlightToSegments } from './hljs';
+
+/** React Native needs a real font name, not the CSS `font-mono` stack. */
+const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
 interface CodeBlockProps {
   code: string;
@@ -62,8 +65,8 @@ export const CodeBlock = memo(function CodeBlock({
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <Text
           selectable
-          className="p-3 font-mono text-xs leading-relaxed"
-          style={{ color: '#d4d4d8' }}
+          className="p-3 text-xs leading-relaxed"
+          style={{ color: '#d4d4d8', fontFamily: MONO_FONT }}
         >
           {segments
             ? segments.map((segment, index) => (

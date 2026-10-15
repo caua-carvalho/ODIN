@@ -1,8 +1,32 @@
 import type { ReactNode } from 'react';
-import { Text, Linking } from 'react-native';
+import { Text, Linking, Platform } from 'react-native';
 import type { Token, Tokens } from 'marked';
 
 const LINK_COLOR = '#FF9A3D';
+
+/**
+ * React Native only accepts a single font name (not a CSS font stack), so the
+ * `font-mono` utility (which resolves to a comma-separated stack) silently
+ * falls back to the system font here. Pick a real monospace face per platform.
+ */
+const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
+
+/**
+ * Inline code chip. Styles are applied inline (not via `className`) because this
+ * is a <Text> nested inside another <Text>: nested-text class resolution is
+ * unreliable, and when the background applies but the colour does not (or vice
+ * versa) the chip renders as a solid block with invisible text.
+ */
+const INLINE_CODE_STYLE = {
+  backgroundColor: '#171719', // --color-surface-elevated
+  color: '#F5F5F7', // --color-text-primary
+  borderWidth: 1,
+  borderColor: 'rgba(255, 255, 255, 0.10)', // --color-border-subtle
+  borderRadius: 5,
+  paddingHorizontal: 5,
+  fontSize: 12.5,
+  fontFamily: MONO_FONT,
+} as const;
 
 function openLink(href: string) {
   if (!href) return;
@@ -47,10 +71,7 @@ function renderInline(token: Token, key: number): ReactNode {
     }
     case 'codespan':
       return (
-        <Text
-          key={key}
-          className="rounded bg-surface-elevated px-1 font-mono text-[12px] text-primary"
-        >
+        <Text key={key} style={INLINE_CODE_STYLE}>
           {(token as Tokens.Codespan).text}
         </Text>
       );
