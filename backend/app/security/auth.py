@@ -1,10 +1,17 @@
-"""Optional bearer-token authentication for the Odin API.
+"""Optional bearer authentication for the Odin API.
 
 Disabled by default (``ODIN_API_TOKEN`` empty). When a token is configured,
-every request to ``/api/*`` (except ``/api/health``) must present it either as
-an ``Authorization: Bearer <token>`` header or — for WebSocket connections,
-which browsers/RN cannot set headers on — via the ``?token=<token>`` query
-parameter.
+every request to ``/api/*`` (except the public paths below) must present a
+credential either as an ``Authorization: Bearer <credential>`` header or — for
+WebSocket connections, which browsers/RN cannot set headers on — via the
+``?token=<credential>`` query parameter.
+
+Two kinds of credential are accepted:
+
+* the raw ``ODIN_API_TOKEN`` (used by the CLI and the mobile app), and
+* a signed, expiring **session token** issued by ``POST /api/auth/login`` (used
+  by the web panel so it never stores the raw token — see
+  ``app/security/session.py``).
 
 Registration order matters: in ``main.py`` this middleware is added *before*
 ``CORSMiddleware``. Starlette makes the **last**-added middleware the outermost
@@ -20,11 +27,18 @@ from urllib.parse import unquote
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.security.session import SessionSigner
+
 # WebSocket close code for policy violation.
 _WS_POLICY_VIOLATION = 1008
 
 # HTTP status for a throttled client.
 _HTTP_TOO_MANY_REQUESTS = 429
+
+# Paths reachable without a credential: the health probe (clients test
+# connectivity with it) and the login endpoint itself (it *issues* credentials
+# and authenticates the raw token from the request body).
+PUBLIC_PATHS = frozenset({"/api/health", "/api/auth/login"})
 
 
 def _client_key(scope: Scope) -> str:
@@ -75,36 +89,46 @@ class _FailureLimiter:
             self._hits.pop(key, None)
 
 
-def _extract_bearer(headers: dict[bytes, bytes]) -> bytes | None:
-    auth = headers.get(b"authorization", b"")
-    prefix = b"Bearer "
-    if auth.startswith(prefix):
-        return auth[len(prefix):].strip()
-    return None
-
-
-def _extract_query_token(query_string: bytes) -> bytes | None:
-    if b"token=" not in query_string:
+def bearer_from_header(authorization: str | None) -> str | None:
+    """Return the credential from an ``Authorization: Bearer <x>`` header."""
+    if not authorization:
         return None
-    for part in query_string.split(b"&"):
-        if part.startswith(b"token="):
-            raw = part[len(b"token="):].decode()
-            return unquote(raw).encode()
+    prefix = "Bearer "
+    if authorization.startswith(prefix):
+        return authorization[len(prefix):].strip() or None
     return None
+
+
+def token_from_query(query_string: str | None) -> str | None:
+    """Return the ``?token=<x>`` credential (WebSocket fallback), if present."""
+    if not query_string:
+        return None
+    for part in query_string.split("&"):
+        if part.startswith("token="):
+            value = unquote(part[len("token="):]).strip()
+            return value or None
+    return None
+
+
+def extract_credential(authorization: str | None, query_string: str | None) -> str | None:
+    """Resolve the credential a client presented (header first, then query)."""
+    return bearer_from_header(authorization) or token_from_query(query_string)
 
 
 class TokenAuthMiddleware:
-    """Rejects /api/* requests that lack the configured bearer token."""
+    """Rejects /api/* requests that lack a valid credential."""
 
     def __init__(
         self,
         app: ASGIApp,
         token: str,
         limiter: _FailureLimiter | None = None,
+        session_signer: SessionSigner | None = None,
     ) -> None:
         self.app = app
         self.expected = token.encode() if token else b""
         self.limiter = limiter
+        self.session_signer = session_signer
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if not self.expected or scope["type"] not in ("http", "websocket"):
@@ -112,7 +136,8 @@ class TokenAuthMiddleware:
             return
 
         path = scope.get("path", "")
-        if not path.startswith("/api") or path == "/api/health":
+        # Tolerate a trailing slash so e.g. /api/health/ is not gated either.
+        if not path.startswith("/api") or path.rstrip("/") in PUBLIC_PATHS:
             await self.app(scope, receive, send)
             return
 
@@ -122,11 +147,12 @@ class TokenAuthMiddleware:
             return
 
         headers = dict(scope.get("headers") or [])
-        provided = _extract_bearer(headers)
-        if provided is None:
-            provided = _extract_query_token(scope.get("query_string", b""))
+        provided = extract_credential(
+            headers.get(b"authorization", b"").decode("latin-1"),
+            (scope.get("query_string") or b"").decode("latin-1"),
+        )
 
-        if provided is None or not secrets.compare_digest(provided, self.expected):
+        if provided is None or not self._is_authorized(provided):
             if self.limiter is not None:
                 self.limiter.record_failure(key)
             if scope["type"] == "websocket":
@@ -145,6 +171,14 @@ class TokenAuthMiddleware:
             self.limiter.reset(key)
 
         await self.app(scope, receive, send)
+
+    def _is_authorized(self, credential: str) -> bool:
+        """Accept the raw API token or a currently-valid session token."""
+        if secrets.compare_digest(credential.encode("utf-8"), self.expected):
+            return True
+        if self.session_signer is not None:
+            return self.session_signer.verify(credential) is not None
+        return False
 
     async def _reject_throttled(self, scope: Scope, send: Send) -> None:
         if scope["type"] == "websocket":

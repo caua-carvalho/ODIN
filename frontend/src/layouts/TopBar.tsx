@@ -1,8 +1,9 @@
 import { useEffect, useState, type RefObject } from 'react';
-import { Search } from 'lucide-react';
+import { LogOut, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { ModelSelector } from '../components/ModelSelector';
+import { useAuth } from '../auth/AuthContext';
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -59,6 +60,7 @@ export function TopBar({
   }, []);
 
   const isOnline = healthData?.status === 'online' && healthData?.agent_ready;
+  const { authEnabled, logout } = useAuth();
 
   return (
     <header className="sticky top-0 z-30 h-14 bg-surface-base/80 backdrop-blur-sm border-b border-subtle flex items-center justify-between px-4">
@@ -149,12 +151,26 @@ export function TopBar({
         )}
       </div>
 
-      {/* Right: UTC Clock */}
+      {/* Right: UTC Clock + Sign out */}
       <div className="flex items-center gap-3">
         <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-muted">
           <span className="text-accent-subtle">UTC</span>
           <span className="text-primary tabular-nums">{time}</span>
         </div>
+
+        {authEnabled && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={logout}
+            aria-label="Sign out"
+            title="Sign out"
+            className="gap-1.5"
+          >
+            <LogOut size={16} aria-hidden="true" />
+            <span className="hidden lg:inline">Sign out</span>
+          </Button>
+        )}
       </div>
     </header>
   );

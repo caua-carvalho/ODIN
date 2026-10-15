@@ -1,14 +1,13 @@
 import { useState, useMemo } from 'react';
 import { usePolling } from '../hooks/usePolling';
+import { useHealth } from '../health/HealthContext';
 import { permissionsApi } from '../api/permissions';
-import { healthApi } from '../api/health';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { PermissionRequestCard } from '../components/PermissionRequestCard';
 import { Input } from '../components/ui/Input';
 import { cn, formatRelativeTime } from '../lib/utils';
 import { Loader2, AlertTriangle, Shield, CheckCircle, Clock, Search, Lock } from 'lucide-react';
 import type { PermissionRequest, PermissionStatus } from '../types/permission';
-import type { HealthResponse } from '../types/health';
 
 type StatusFilter = 'all' | PermissionStatus;
 
@@ -32,7 +31,7 @@ export function PermissionsPage() {
     () => permissionsApi.listPendingPermissions(),
     8000
   );
-  const health = usePolling<HealthResponse>(() => healthApi.getHealth(), 30000);
+  const health = useHealth();
 
   const filtered = useMemo(() => {
     const list = allPermissions.data ?? [];

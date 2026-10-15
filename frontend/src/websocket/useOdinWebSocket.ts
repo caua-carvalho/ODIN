@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { OdinEvent, ClientMessage } from '../types/websocket';
 import { getApiToken } from '../api/client';
+import { notifyUnauthorized } from '../api/session';
 
 interface UseOdinWebSocketOptions {
   conversationId: string | null;
@@ -99,9 +100,16 @@ export function useOdinWebSocket({
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setIsConnected(false);
         callbacksRef.current.onDisconnect?.();
+
+        // 1008 = policy violation: the server rejected our credential. Don't
+        // reconnect — surface it so the app can return to the login screen.
+        if (event.code === 1008) {
+          notifyUnauthorized();
+          return;
+        }
 
         // No reconnect after intentional close, and never infinitely
         if (

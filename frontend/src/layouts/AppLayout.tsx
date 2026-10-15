@@ -6,10 +6,11 @@ import { PageFallback } from '../components/PageFallback';
 import { CommandPalette, type PaletteAction } from '../components/CommandPalette';
 import { ShortcutsHelp } from '../components/ShortcutsHelp';
 import { BriefingModal } from '../components/BriefingModal';
-import { healthApi } from '../api/health';
 import { briefingApi } from '../api/briefing';
+import { useHealth } from '../health/HealthContext';
 import { WsStatusContext } from './ws-status';
 import { useHotkeys, isModalOpen } from '../hooks/useHotkeys';
+import { useAuth } from '../auth/AuthContext';
 import { cn } from '../lib/utils';
 import {
   LayoutDashboard,
@@ -22,6 +23,7 @@ import {
   Keyboard,
   Sparkles,
   FolderKanban,
+  LogOut,
 } from 'lucide-react';
 import type { HealthResponse } from '../types/health';
 import type { BriefingResponse } from '../types/briefing';
@@ -49,6 +51,18 @@ const PAGE_KEYS: Record<string, string> = {
 
 const isDesktop = () => window.innerWidth >= 1024;
 
+/** Shown in the chrome when the backend is unreachable. */
+const OFFLINE_HEALTH: HealthResponse = {
+  status: 'offline',
+  version: '0.1.0',
+  model_provider: 'unknown',
+  model: 'unknown',
+  workspace: '',
+  tools_count: 0,
+  agent_ready: false,
+  auth_required: false,
+};
+
 export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -58,12 +72,17 @@ export function AppLayout() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [activePage, setActivePage] = useState('dashboard');
-  const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [briefingData, setBriefingData] = useState<BriefingResponse | null>(null);
   const [briefingOpen, setBriefingOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const firstNavRef = useRef<HTMLButtonElement>(null);
+  const { authEnabled, logout } = useAuth();
+
+  // Health is owned by a shared provider that only polls while a screen that
+  // renders it is visible (see health/HealthContext.tsx).
+  const health = useHealth();
+  const healthData = health.data ?? (health.error ? OFFLINE_HEALTH : undefined);
 
   const wsStatus = useMemo(
     () => ({ wsConnected, setWsConnected }),
@@ -81,31 +100,6 @@ export function AppLayout() {
     else if (path === '/system') setActivePage('system');
     else setActivePage('dashboard');
   }, [location.pathname]);
-
-  // Fetch health data on mount and periodically
-  const fetchHealth = useCallback(async () => {
-    try {
-      const data = await healthApi.getHealth();
-      setHealthData(data);
-    } catch (err) {
-      console.error('Failed to fetch health:', err);
-      setHealthData({
-        status: 'offline',
-        version: '0.1.0',
-        model_provider: 'unknown',
-        model: 'unknown',
-        workspace: '',
-        tools_count: 0,
-        agent_ready: false,
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 30000);
-    return () => clearInterval(interval);
-  }, [fetchHealth]);
 
   // Load the daily briefing once on mount; show the modal only once per boot.
   useEffect(() => {
@@ -228,8 +222,11 @@ export function AppLayout() {
       { id: 'toggle-sidebar', label: 'Toggle navigation menu', hint: 'Ctrl B', icon: PanelLeft, run: handleToggleSidebar },
       { id: 'shortcuts-help', label: 'Show keyboard shortcuts', hint: '?', icon: Keyboard, run: () => setHelpOpen(true) },
       { id: 'show-briefing', label: 'Show daily briefing', icon: Sparkles, run: openBriefing },
+      ...(authEnabled
+        ? [{ id: 'sign-out', label: 'Sign out', icon: LogOut, run: logout }]
+        : []),
     ],
-    [handleNavigate, handleToggleSidebar, openBriefing]
+    [handleNavigate, handleToggleSidebar, openBriefing, authEnabled, logout]
   );
 
   return (
@@ -247,7 +244,7 @@ export function AppLayout() {
         isOpen={sidebarOpen}
         activePage={activePage}
         onNavigate={handleNavigate}
-        healthData={healthData || undefined}
+        healthData={healthData}
         firstNavRef={firstNavRef}
       />
 
@@ -265,10 +262,10 @@ export function AppLayout() {
           isSidebarOpen={sidebarOpen}
           onMenuClick={handleToggleSidebar}
           onOpenCommands={() => setPaletteOpen(true)}
-          healthData={healthData || undefined}
+          healthData={healthData}
           wsConnected={wsConnected}
           activeConversationTitle={activeConversationTitle}
-          onRefreshHealth={fetchHealth}
+          onRefreshHealth={health.refresh}
         />
 
         {/* Page content — keyed by path so routes fade in and scroll resets */}

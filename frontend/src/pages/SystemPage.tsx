@@ -1,15 +1,14 @@
 import { usePolling } from '../hooks/usePolling';
+import { useHealth } from '../health/HealthContext';
 import { systemApi } from '../api/system';
-import { healthApi } from '../api/health';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { cn, formatBytes, formatUptime } from '../lib/utils';
 import { Loader2, AlertTriangle, Cpu, MemoryStick, HardDrive, Activity, Gauge, Server } from 'lucide-react';
 import type { SystemInfo } from '../types/system';
-import type { HealthResponse } from '../types/health';
 
 export function SystemPage() {
   const system = usePolling<SystemInfo>(() => systemApi.getSystemInfo(), 4000);
-  const health = usePolling<HealthResponse>(() => healthApi.getHealth(), 15000);
+  const health = useHealth();
 
   if (system.loading && !system.data) {
     return (

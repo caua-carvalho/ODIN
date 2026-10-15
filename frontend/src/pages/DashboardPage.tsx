@@ -1,18 +1,17 @@
 import { useMemo, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
-import { healthApi } from '../api/health';
+import { useHealth } from '../health/HealthContext';
 import { systemApi } from '../api/system';
 import { permissionsApi } from '../api/permissions';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { PermissionRequestCard } from '../components/PermissionRequestCard';
 import { cn, formatBytes, formatUptime } from '../lib/utils';
 import { Cpu, HardDrive, MemoryStick, Activity, AlertTriangle, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
-import type { HealthResponse } from '../types/health';
 import type { SystemInfo } from '../types/system';
 import type { PermissionRequest } from '../types/permission';
 
 export function DashboardPage() {
-  const health = usePolling<HealthResponse>(() => healthApi.getHealth(), 15000);
+  const health = useHealth();
   const system = usePolling<SystemInfo>(() => systemApi.getSystemInfo(), 5000);
   const pending = usePolling<PermissionRequest[]>(() => permissionsApi.listPendingPermissions(), 10000);
 

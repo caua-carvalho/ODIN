@@ -1,18 +1,30 @@
+import {
+  clearSession,
+  getAuthCredential,
+  getStoredSession,
+  notifyUnauthorized,
+} from './session';
+
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 /**
- * Optional API token for the mobile/remote clients.
+ * Credential for API/WebSocket requests.
  *
- * Set `localStorage['odin_api_token']` (e.g. in the browser console:
- * `localStorage.setItem('odin_api_token', '<token>')`) to authenticate every
- * API/WebSocket request once the backend has ODIN_API_TOKEN enabled.
+ * Prefers the expiring session token obtained from `POST /api/auth/login`
+ * (stored by `api/session.ts`); falls back to a hand-set
+ * `localStorage['odin_api_token']` for CLI-style/legacy setups.
  */
 export function getApiToken(): string {
-  try {
-    return window.localStorage.getItem('odin_api_token') || '';
-  } catch {
-    return '';
-  }
+  return getAuthCredential();
+}
+
+/**
+ * Handle a rejected credential: drop the stale session and let the app return
+ * to the login screen. The legacy raw token is left untouched.
+ */
+function handleUnauthorized(): void {
+  if (getStoredSession()) clearSession();
+  notifyUnauthorized();
 }
 
 class ApiError extends Error {
@@ -65,6 +77,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
   });
 
+  if (response.status === 401) handleUnauthorized();
+
   return parseResponse<T>(response);
 }
 
@@ -79,6 +93,7 @@ async function upload<T>(endpoint: string, formData: FormData): Promise<T> {
     body: formData,
     headers,
   });
+  if (response.status === 401) handleUnauthorized();
   return parseResponse<T>(response);
 }
 

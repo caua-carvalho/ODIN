@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     odin_auth_max_failures: int = 10
     odin_auth_window_seconds: int = 60
 
+    # Web panel login sessions.
+    # The panel exchanges ODIN_API_TOKEN for a signed session token (see
+    # POST /api/auth/login) so it does not have to keep the raw token in
+    # localStorage. Empty = derive the signing secret from ODIN_API_TOKEN.
+    odin_session_secret: str = ""
+    # Session lifetime when "remember me" is checked (days) or unchecked
+    # (hours). Changing ODIN_SESSION_SECRET/ODIN_API_TOKEN invalidates sessions.
+    odin_session_ttl_days: int = 7
+    odin_session_ttl_hours: int = 12
+
     # Debug
     debug: bool = False
 

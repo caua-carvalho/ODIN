@@ -19,6 +19,7 @@ from app.tools.projects.tools import create_project_tools
 from app.security.path_guard import PathGuard
 from app.security.policy import SecurityPolicy
 from app.security.auth import TokenAuthMiddleware, _FailureLimiter
+from app.security.session import get_session_signer
 from app.api.websocket import ws_manager
 
 # Configure logging
@@ -123,7 +124,15 @@ if settings.odin_api_token:
         max_failures=settings.odin_auth_max_failures,
         window_seconds=settings.odin_auth_window_seconds,
     )
-    app.add_middleware(TokenAuthMiddleware, token=settings.odin_api_token, limiter=_auth_limiter)
+    app.add_middleware(
+        TokenAuthMiddleware,
+        token=settings.odin_api_token,
+        limiter=_auth_limiter,
+        # Accepts signed session tokens (issued by POST /api/auth/login) in
+        # addition to the raw token, so the web panel can log in once and stay
+        # authenticated for up to ODIN_SESSION_TTL_DAYS.
+        session_signer=get_session_signer(),
+    )
     logger.info("API token authentication enabled (ODIN_API_TOKEN set)")
 
 # CORS
@@ -142,10 +151,11 @@ app.add_middleware(
 )
 
 # Mount routers
-from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, briefing, projects
+from app.api.routes import conversations, tools, skills, permissions, mcp, system, chat, providers, briefing, projects, auth
 
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
 app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(permissions.router, prefix="/api/permissions", tags=["permissions"])
@@ -167,6 +177,8 @@ async def health():
         "workspace": settings.odin_workspace,
         "tools_count": len(tool_registry),
         "agent_ready": odin_agent is not None and odin_agent.provider is not None,
+        # The web panel uses this to decide whether to show the login screen.
+        "auth_required": bool(settings.odin_api_token),
     }
 
 
