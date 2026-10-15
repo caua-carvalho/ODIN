@@ -31,10 +31,11 @@ with TestClient(main_mod.app) as client:
 
     agent = main_mod.odin_agent
     from app.agent.providers import LLMProvider
-    from app.agent.providers.ollama import OllamaProvider
+    from app.agent.providers.litellm_provider import LiteLLMProvider
 
-    assert isinstance(agent.provider, OllamaProvider)
+    assert isinstance(agent.provider, LiteLLMProvider)
     assert isinstance(agent.provider, LLMProvider)
+    assert agent.provider.litellm_model == "ollama/qwen3:0.6b"
     print("provider:", type(agent.provider).__name__, agent.provider.model)
 
     # Provider must be provider-agnostic in the agent

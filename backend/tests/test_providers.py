@@ -45,6 +45,7 @@ from app.agent.providers.groq import (
     _build_groq_tools,
     _finalize_tool_calls,
 )
+from app.agent.providers.litellm_provider import LiteLLMProvider
 from app.config import Settings
 from app.tools.registry import ToolRegistry
 from google.genai import types
@@ -567,7 +568,7 @@ class TestConfiguration:
             _env_file=None,
         )
         provider = create_llm_provider(s)
-        assert isinstance(provider, OllamaProvider)
+        assert isinstance(provider, LiteLLMProvider)
 
 
 # ---------------------------------------------------------------------------
@@ -579,9 +580,10 @@ class TestFactory:
             odin_model_provider="ollama", odin_model="qwen3:0.6b", _env_file=None
         )
         provider = create_llm_provider(s)
-        assert isinstance(provider, OllamaProvider)
+        assert isinstance(provider, LiteLLMProvider)
         assert provider.model == "qwen3:0.6b"
-        assert provider.base_url == "http://localhost:11434"
+        assert provider.litellm_model == "ollama/qwen3:0.6b"
+        assert provider.api_base == "http://localhost:11434"
 
     def test_creates_gemini_provider(self):
         s = Settings(
@@ -591,8 +593,10 @@ class TestFactory:
             _env_file=None,
         )
         provider = create_llm_provider(s)
-        assert isinstance(provider, GeminiProvider)
+        assert isinstance(provider, LiteLLMProvider)
         assert provider.model == "gemini-2.0-flash"
+        assert provider.litellm_model == "gemini/gemini-2.0-flash"
+        assert provider.api_key == "test-key"
 
     def test_creates_groq_provider(self):
         s = Settings(
@@ -602,9 +606,32 @@ class TestFactory:
             _env_file=None,
         )
         provider = create_llm_provider(s)
-        assert isinstance(provider, GroqProvider)
+        assert isinstance(provider, LiteLLMProvider)
         assert provider.model == "openai/gpt-oss-120b"
-        assert provider.base_url == "https://api.groq.com/openai/v1"
+        # Groq model ids already contain a slash; the vendor prefix is added.
+        assert provider.litellm_model == "groq/openai/gpt-oss-120b"
+        assert provider.api_base == "https://api.groq.com/openai/v1"
+
+    def test_creates_openai_provider(self):
+        s = Settings(
+            odin_model_provider="openai",
+            odin_model="gpt-4o-mini",
+            openai_api_key="test-key",
+            _env_file=None,
+        )
+        provider = create_llm_provider(s)
+        assert isinstance(provider, LiteLLMProvider)
+        assert provider.litellm_model == "openai/gpt-4o-mini"
+
+    def test_model_already_prefixed_is_not_double_prefixed(self):
+        s = Settings(
+            odin_model_provider="gemini",
+            odin_model="gemini/gemini-2.0-flash",
+            gemini_api_key="test-key",
+            _env_file=None,
+        )
+        provider = create_llm_provider(s)
+        assert provider.litellm_model == "gemini/gemini-2.0-flash"
 
     def test_groq_without_api_key_raises(self):
         s = Settings(
@@ -622,7 +649,8 @@ class TestFactory:
             _env_file=None,
         )
         provider = create_llm_provider(s)
-        assert isinstance(provider, OllamaProvider)
+        assert isinstance(provider, LiteLLMProvider)
+        assert provider.provider == "ollama"
 
     def test_unknown_provider_raises_explicit_error(self):
         s = Settings(odin_model_provider="xyz", _env_file=None)
@@ -630,7 +658,9 @@ class TestFactory:
             create_llm_provider(s)
         message = str(exc.value)
         assert "Unsupported LLM provider: xyz" in message
-        assert "Supported providers: gemini, groq, ollama" in message
+        # The message lists the real, catalog-derived provider set.
+        for name in ("gemini", "groq", "ollama", "openai", "anthropic"):
+            assert name in message
 
     def test_gemini_without_api_key_raises(self):
         s = Settings(

@@ -1,5 +1,6 @@
 import logging
 import logging.config
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -95,6 +96,16 @@ async def lifespan(app: FastAPI):
     provider = create_llm_provider(settings)
     # Record the active selection so /api/health and the selectors can report it.
     catalog.set_active(settings.odin_model_provider, settings.odin_model)
+
+    # Warm LiteLLM off the critical path. Importing it costs ~15s and the
+    # adapter imports it lazily on first use, so a daemon thread pre-loads it
+    # while the rest of startup runs — the first user message should not pay
+    # for it. A daemon thread never blocks shutdown.
+    from app.agent.providers import litellm_provider
+
+    threading.Thread(
+        target=litellm_provider.warm, name="litellm-warmup", daemon=True
+    ).start()
 
     # Initialize agent
     odin_agent = OdinAgent(

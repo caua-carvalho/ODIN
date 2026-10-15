@@ -36,6 +36,7 @@ class ProviderMeta:
         "default_model",
         "api_key_setting",
         "fallback_models",
+        "litellm_prefix",
     )
 
     def __init__(
@@ -46,6 +47,7 @@ class ProviderMeta:
         default_model: str,
         api_key_setting: str | None = None,
         fallback_models: tuple[str, ...] = (),
+        litellm_prefix: str | None = None,
     ) -> None:
         self.id = id
         self.label = label
@@ -55,6 +57,9 @@ class ProviderMeta:
         # or None when no credentials are needed (e.g. a local Ollama server).
         self.api_key_setting = api_key_setting
         self.fallback_models = fallback_models
+        # LiteLLM routing prefix (``f"{prefix}/{model}"``). Defaults to the
+        # provider id; only set it explicitly when the two differ.
+        self.litellm_prefix = litellm_prefix or id
 
 
 PROVIDERS: dict[str, ProviderMeta] = {
@@ -94,6 +99,26 @@ PROVIDERS: dict[str, ProviderMeta] = {
             "meta-llama/llama-4-maverick-17b-128e-instruct",
             "qwen/qwen3-32b",
             "moonshotai/kimi-k2-instruct",
+        ),
+    ),
+    "openai": ProviderMeta(
+        id="openai",
+        label="OpenAI",
+        description="OpenAI GPT models via the OpenAI API",
+        default_model="gpt-4o-mini",
+        api_key_setting="openai_api_key",
+        fallback_models=("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"),
+    ),
+    "anthropic": ProviderMeta(
+        id="anthropic",
+        label="Anthropic",
+        description="Anthropic Claude models",
+        default_model="claude-3-5-haiku-latest",
+        api_key_setting="anthropic_api_key",
+        fallback_models=(
+            "claude-3-5-haiku-latest",
+            "claude-3-5-sonnet-latest",
+            "claude-sonnet-4-20250514",
         ),
     ),
 }

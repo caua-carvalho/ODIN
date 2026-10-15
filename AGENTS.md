@@ -84,13 +84,37 @@ walkthrough in **`README.deploy.md`**. Pieces:
 
 ## LLM providers
 
-The backend supports **three** LLM providers, registered in `backend/app/agent/providers/factory.py` under `PROVIDER_BUILDERS` and described in `backend/app/agent/providers/catalog.py` (`PROVIDERS`):
+Every provider is served by **one** LiteLLM-backed adapter, `LiteLLMProvider`
+(`backend/app/agent/providers/litellm_provider.py`), built by `create_llm_provider`
+in `backend/app/agent/providers/factory.py` (`PROVIDER_BUILDERS` is derived from
+the catalog). Providers and their availability rules live in
+`backend/app/agent/providers/catalog.py` (`PROVIDERS`):
 
 - **gemini**: Requires `GEMINI_API_KEY` in `.env`.
-- **groq**: Requires `GROQ_API_KEY` in `.env`. OpenAI-compatible API.
+- **groq**: Requires `GROQ_API_KEY` in `.env`; OpenAI-compatible API (`GROQ_BASE_URL`).
 - **ollama**: Requires `OLLAMA_BASE_URL` (default `http://localhost:11434`) in `.env`. No API key.
+- **openai**: Requires `OPENAI_API_KEY` in `.env`.
+- **anthropic**: Requires `ANTHROPIC_API_KEY` in `.env`.
 
-> **Note**: The local, git-ignored `.env` banner lists `openai` and `anthropic` as options, but `PROVIDER_BUILDERS` only implements `gemini`, `groq`, `ollama` (the committed `.env.example` matches). Selecting an unimplemented provider raises `Unsupported LLM provider: ...`. Add new providers by: (1) creating an adapter in `backend/app/agent/providers/` implementing `LLMProvider`, (2) registering it in `PROVIDER_BUILDERS` **and** adding its `ProviderMeta` to `catalog.PROVIDERS`.
+`ODIN_MODEL` is the vendor model id; the LiteLLM vendor prefix is added
+automatically (`gemini-2.5-flash` → `gemini/gemini-2.5-flash`; groq ids already
+contain a slash, so `openai/gpt-oss-120b` → `groq/openai/gpt-oss-120b`). A model
+that is already prefixed is left untouched.
+
+> **Adding a provider**: add one `ProviderMeta` to `catalog.PROVIDERS` — no new
+> adapter class is needed. The catalog's `litellm_prefix` (defaults to the id)
+> and `api_key_setting` drive both the factory and `/api/providers`.
+
+> **LiteLLM is imported lazily** (the adapter imports it on first use) because
+> `import litellm` costs ~15s. `main.py` starts a daemon thread (`warm()`) at
+> startup so the first user message does not pay that cost. The three legacy
+> adapters (`gemini.py`, `groq.py`, `ollama.py`) are kept for one release as a
+> rollback path but are no longer built by the factory.
+
+> **Tool-call ids are preserved verbatim** by `LiteLLMProvider`. LiteLLM encodes
+> the Gemini thought signature inside the tool-call id (separator `__thought__`)
+> and reconstructs it on the next request, so never regenerate that id. Provider
+> extras also round-trip through `LLMToolCall.metadata["provider_specific_fields"]`.
 
 > **Runtime selection**: The active provider/model can be switched at runtime (global, process-wide) via `POST /api/providers/select`, used by the frontend TopBar selector (`ModelSelector.tsx`) and the CLI `/model` command. The switch is **in-memory only** — restarting the backend falls back to `.env`. Provider metadata, availability and dynamic model discovery live in `backend/app/agent/providers/catalog.py`; `/api/health` reports the active selection (not raw `settings`).
 
@@ -218,7 +242,7 @@ Key facts:
 
 1. **Lifespan in `main.py`** is the single entry point for startup init: DB init → security init → tool registration → LLM provider init → agent init. If you add a tool, you must register it here (in `create_filesystem_tools` or manually).
 
-2. **Provider factory** (`factory.py`) is the only place that maps `ODIN_MODEL_PROVIDER` → concrete provider. Adding a new provider requires editing this file.
+2. **Provider factory** (`factory.py`) is the only place that maps `ODIN_MODEL_PROVIDER` → concrete provider. Since the LiteLLM migration it builds one `LiteLLMProvider` for every vendor; adding a provider means adding a `ProviderMeta` to `catalog.py`, not editing the factory.
 
 3. **Security policy** (`policy.py`) determines what the agent is allowed to do. The agent will not execute a tool if the policy denies it. If you need to change what's "safe", edit `SAFE_DEV_EXECUTABLES`, `PRIVILEGED_EXECUTABLES`, etc.
 
