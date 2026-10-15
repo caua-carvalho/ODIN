@@ -107,9 +107,9 @@ that is already prefixed is left untouched.
 
 > **LiteLLM is imported lazily** (the adapter imports it on first use) because
 > `import litellm` costs ~15s. `main.py` starts a daemon thread (`warm()`) at
-> startup so the first user message does not pay that cost. The three legacy
-> adapters (`gemini.py`, `groq.py`, `ollama.py`) are kept for one release as a
-> rollback path but are no longer built by the factory.
+> startup so the first user message does not pay that cost. The legacy adapters
+> (`gemini.py`, `groq.py`, `ollama.py`) were **removed** once LiteLLM was
+> validated end-to-end; `litellm_provider.py` is now the only adapter.
 
 > **Tool-call ids are preserved verbatim** by `LiteLLMProvider`. LiteLLM encodes
 > the Gemini thought signature inside the tool-call id (separator `__thought__`)
@@ -162,7 +162,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contracts, tool-call history, factory, env config), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contract, tool registry bridge, tool-call history, factory, env config), `test_litellm_provider.py` (the LiteLLM adapter: message/tool conversion, streamed tool-call accumulation, provider-extra round-trip, fake backend), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence
