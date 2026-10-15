@@ -32,11 +32,15 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+# Type=forking + PIDFile lets systemd supervise the uvicorn process that
+# scripts/server.sh backgrounds (nohup), so Restart=always actually works.
+Type=forking
+PIDFile=%S/odin/server.pid
 WorkingDirectory=$ROOT_DIR
 ExecStart=/usr/bin/env bash $ROOT_DIR/scripts/server.sh start
 ExecStop=/usr/bin/env bash $ROOT_DIR/scripts/server.sh stop
+Restart=always
+RestartSec=3
 TimeoutStartSec=180
 TimeoutStopSec=60
 

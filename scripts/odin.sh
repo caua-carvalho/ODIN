@@ -34,9 +34,25 @@ EOF
 
 command="${1:-}"
 
+# When the systemd --user unit is installed, manage the backend through it so
+# that Restart=always actually supervises the process and `odin restart` does
+# not race the unit. `status`/`logs` keep reading the pidfile/log written by
+# server.sh.
+use_systemd=0
+if command -v systemctl >/dev/null 2>&1 && systemctl --user cat odin.service >/dev/null 2>&1; then
+    use_systemd=1
+fi
+
 
 case "$command" in
-    start|stop|restart|status)
+    start|stop|restart)
+        if [[ "$use_systemd" -eq 1 ]]; then
+            exec systemctl --user "$command" odin.service
+        fi
+        exec "$SERVER_SCRIPT" "$@"
+        ;;
+
+    status)
         exec "$SERVER_SCRIPT" "$@"
         ;;
 
