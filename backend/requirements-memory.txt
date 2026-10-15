@@ -1,0 +1,22 @@
+# Odin long-term memory — OPTIONAL dependencies (Phase 3).
+#
+# The base install (backend/requirements.txt) does NOT include these. Odin
+# boots and runs exactly as before without them; Mem0 is imported lazily and
+# only when ODIN_MEMORY_ENABLED=true.
+#
+# Install (into the backend venv) only if you want long-term memory:
+#     backend/.venv/bin/pip install -r backend/requirements-memory.txt
+#
+# Then in .env:
+#     ODIN_MEMORY_ENABLED=true
+#     ODIN_MEMORY_LLM_MODEL=qwen3:0.6b            # served by your local Ollama
+#     ODIN_MEMORY_EMBEDDER_MODEL=nomic-embed-text # pull it first: ollama pull nomic-embed-text
+#     ODIN_MEMORY_VECTOR_STORE=chroma             # embedded, on-disk, no server
+#
+# Local-first by design: Mem0's extraction LLM and embedder both point at
+# OLLAMA_BASE_URL, and the vector store is embedded (default Chroma), so there
+# is no server and no marginal API cost.
+
+mem0ai>=0.1.100
+chromadb>=0.5.0
+ollama>=0.4.0

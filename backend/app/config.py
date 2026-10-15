@@ -51,6 +51,22 @@ class Settings(BaseSettings):
     # responses/tool calls with thinking enabled, so the default is false.
     ollama_think: bool = False
 
+    # Long-term memory (Phase 3, optional). Disabled by default: with it off
+    # the agent loop behaves exactly as before and Mem0 is never imported.
+    # Enabling it requires the optional deps in backend/requirements-memory.txt.
+    odin_memory_enabled: bool = False
+    # Local Ollama models used by Mem0's extraction LLM and embedder (keeps the
+    # feature local-first and cost-free). The base URL reuses OLLAMA_BASE_URL.
+    odin_memory_llm_model: str = "qwen3:0.6b"
+    odin_memory_embedder_model: str = "nomic-embed-text"
+    # Embedded vector store backend (no server). "chroma" by default; any store
+    # Mem0 supports (e.g. "qdrant") can be set here. Empty path = Mem0 default.
+    odin_memory_vector_store: str = "chroma"
+    odin_memory_path: str = ""
+    # Namespace the memories (per-user) and how many to recall per turn.
+    odin_memory_user_id: str = "odin"
+    odin_memory_recall_limit: int = 5
+
     # Daily briefing
     odin_weather_city: str = "São José dos Campos"
     odin_weather_lat: float = -23.1794
