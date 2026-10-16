@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app.agent.providers.base import LLMMessage, LLMChunk, LLMToolCall
 from app.agent.prompts.system import get_system_prompt
+from app.agent.memory import format_memory_context
 from app.database.models import Conversation, Message
 from app.database.session import get_db_session
 from app.tools.registry import ToolRegistry
@@ -19,6 +20,23 @@ logger = logging.getLogger("odin.agent")
 
 # Maximum messages to include in context window
 MAX_CONTEXT_MESSAGES = 50
+
+# Tool results can be huge (a whole file or directory listing). Truncate what we
+# feed back into the LLM context so a single tool call cannot blow the context
+# window; the UI still receives the full result in the `tool_end` event.
+MAX_TOOL_RESULT_CHARS = 8000
+
+
+def _truncate_for_context(content: str, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
+    """Bound a tool result fed back to the LLM, keeping the head of the payload.
+
+    Returns ``content`` unchanged when it already fits; otherwise truncates and
+    appends a marker so the model knows the view is partial.
+    """
+    if content is None or len(content) <= limit:
+        return content
+    removed = len(content) - limit
+    return f"{content[:limit]}\n…[truncated {removed} chars]"
 
 
 class OdinAgent:
@@ -33,10 +51,14 @@ class OdinAgent:
         provider,  # LLMProvider
         tool_registry: ToolRegistry,
         websocket_manager=None,
+        memory=None,  # Optional[MemoryService]
     ) -> None:
         self.provider = provider
         self.tool_registry = tool_registry
         self.ws_manager = websocket_manager
+        # Optional long-term memory (Phase 3). ``None`` (the default) means the
+        # loop is byte-for-byte the same as before this feature existed.
+        self.memory = memory
 
     async def chat(
         self,
@@ -75,6 +97,16 @@ class OdinAgent:
             )
             db.add(user_msg)
 
+        # Recall long-term memories before constructing the context. Memories are
+        # appended to the system prompt (do not add them as messages) so that the
+        # LiteLLM adapter — which moves system-only instructions to the top-level
+        # "system" field — carries them to the provider unchanged.
+        system_prompt = get_system_prompt()
+        if self.memory is not None:
+            memories = await self.memory.recall(message, conversation_id=conversation_id)
+            if memories:
+                system_prompt = system_prompt + "\n\n" + format_memory_context(memories)
+
         # Build messages for LLM
         llm_messages: list[LLMMessage] = []
         for msg in history:
@@ -84,7 +116,6 @@ class OdinAgent:
 
         # Tool definitions for LLM
         tool_definitions = self.tool_registry.to_llm_tools()
-        system_prompt = get_system_prompt()
 
         # Agentic loop
         full_response_text = ""
@@ -211,11 +242,13 @@ class OdinAgent:
                                 "result": {"error": str(e)},
                             }
 
-                    # Add tool result to context
+                    # Add tool result to context (truncated: the event above
+                    # carries the full result to the UI; the LLM only needs
+                    # a bounded view).
                     llm_messages.append(
                         LLMMessage(
                             role="tool",
-                            content=result_content,
+                            content=_truncate_for_context(result_content),
                             tool_call_id=call_id,
                             tool_name=tool_name,
                         )
@@ -252,6 +285,16 @@ class OdinAgent:
                             f"Could not persist partial assistant message: {exc}"
                         )
 
+        # Persist the exchange to long-term memory AFTER `done`: Mem0 runs an
+        # extraction LLM call, so doing it here keeps it off the completion
+        # signal's critical path. Best-effort — `remember` never raises.
+        if self.memory is not None and full_response_text:
+            await self.memory.remember(
+                user_message=message,
+                assistant_message=full_response_text,
+                conversation_id=conversation_id,
+            )
+
     async def _ensure_conversation(self, db: AsyncSession, conversation_id: str) -> None:
         result = await db.execute(
             select(Conversation).where(Conversation.id == conversation_id)
@@ -267,13 +310,20 @@ class OdinAgent:
             db.add(conv)
 
     async def _load_history(self, db: AsyncSession, conversation_id: str) -> list[Message]:
+        """Load the most recent messages, in chronological (oldest-first) order.
+
+        Ordered DESC (newest first) then reversed: the previous ASC query
+        returned the *oldest* MAX_CONTEXT_MESSAGES, so in long conversations the
+        agent forgot the tail of the thread.
+        """
         result = await db.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
+            .order_by(Message.created_at.desc())
             .limit(MAX_CONTEXT_MESSAGES)
         )
-        return list(result.scalars().all())
+        # Newest-first window -> restore chronological order for the LLM.
+        return list(reversed(result.scalars().all()))
 
     def _db_message_to_llm(self, msg: Message) -> LLMMessage:
         tool_calls = None

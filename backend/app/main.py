@@ -13,6 +13,7 @@ from app.config import settings
 from app.database.session import init_db
 from app.agent.agent import OdinAgent
 from app.agent.providers import catalog, create_llm_provider
+from app.agent.memory import create_memory_service
 from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
@@ -112,6 +113,9 @@ async def lifespan(app: FastAPI):
         provider=provider,
         tool_registry=tool_registry,
         websocket_manager=ws_manager,
+        # Optional long-term memory. ``None`` when disabled or when Mem0 is not
+        # installed — the agent loop is then identical to before Phase 3.
+        memory=create_memory_service(settings),
     )
     logger.info("Odin agent ready")
 
@@ -188,6 +192,8 @@ async def health():
         "workspace": settings.odin_workspace,
         "tools_count": len(tool_registry),
         "agent_ready": odin_agent is not None and odin_agent.provider is not None,
+        # True when long-term memory (Mem0) is active for this process.
+        "memory_enabled": bool(odin_agent is not None and odin_agent.memory is not None),
         # The web panel uses this to decide whether to show the login screen.
         "auth_required": bool(settings.odin_api_token),
     }
