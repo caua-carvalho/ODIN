@@ -43,13 +43,16 @@ class LLMTool(BaseModel):
 class LLMChunk(BaseModel):
     """A streamed chunk from the LLM."""
 
-    type: Literal["text", "tool_call", "done", "error"]
-    content: str | None = None  # for text chunks
+    type: Literal["text", "tool_call", "done", "error", "retry"]
+    content: str | None = None  # for text chunks (or a human note on retry)
     tool_call_id: str | None = None  # for tool_call chunks
     tool_name: str | None = None
     tool_arguments: dict | None = None
     metadata: dict | None = None  # opaque provider extras, see LLMToolCall
     error: str | None = None
+    # For "retry" chunks: how long the provider is about to wait before
+    # reissuing the request (seconds). Purely informational.
+    retry_after: float | None = None
 
 
 @runtime_checkable
@@ -67,6 +70,8 @@ class LLMProvider(Protocol):
         Yields LLMChunk objects with type:
         - 'text': content is a string fragment
         - 'tool_call': tool_name, tool_call_id, tool_arguments are set
+        - 'retry': the previous request hit a transient error and is being
+          retried; content holds a human-readable note
         - 'done': generation complete
         - 'error': error message
         """

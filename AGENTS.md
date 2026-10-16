@@ -162,7 +162,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contract, tool registry bridge, tool-call history, factory, env config), `test_litellm_provider.py` (the LiteLLM adapter: message/tool conversion, streamed tool-call accumulation, provider-extra round-trip, fake backend), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contract, tool registry bridge, tool-call history, factory, env config), `test_litellm_provider.py` (the LiteLLM adapter: message/tool conversion, streamed tool-call accumulation, provider-extra round-trip, transient-failure retries, fake backend), `test_agent_chat.py` (agent loop: retry→status forwarding, partial save on cancellation), `test_chat_ws.py` (chat WebSocket: stop cancels the in-flight turn, busy guard, ping/pong), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence
@@ -179,7 +179,7 @@ Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.
 | `GET /api/health` | Returns status, model_provider, model, workspace, tools_count, agent_ready, auth_required (public) |
 | `POST /api/auth/login` | Log in with `{"token": "<ODIN_API_TOKEN>", "remember": true}`; returns a signed session token (public) |
 | `GET /api/auth/session` | Describe the presented credential (`method`, `expires_at`); requires auth |
-| `GET /api/ws/{conv_id}` | WebSocket chat endpoint (stream events: text_chunk, tool_start, tool_end, done, error) |
+| `GET /api/ws/{conv_id}` | WebSocket chat endpoint (client sends `message` / `stop` / `ping`; streams `status`, `text_chunk`, `tool_start`, `tool_end`, `permission_request`, `done`, `error`) |
 | `GET /api/conversations` | List conversations |
 | `POST /api/conversations` | Create a new conversation (⚠️ **no trailing slash** — `POST /api/conversations/` returns 405) |
 | `GET /api/conversations/{id}` | Get a conversation |
@@ -250,7 +250,9 @@ Key facts:
 
    > **The approval UI only appears if the agent actually calls the tool.** The tools create the DB row and broadcast `permission_request` from *inside* `_request_permission`. If the LLM instead asks the user for permission in prose ("I need your authorization — shall I proceed?"), no request exists, so the web/mobile Approve/Deny buttons never render. This is why the system prompt (`agent/prompts/system.py`) and the tool descriptions spell out that the model must **invoke the tool directly and never ask for confirmation in chat** — do not reword them back to "state the reason when requesting approval". Guarded by `tests/test_prompts.py::test_system_prompt_keeps_hitl_contract`.
 
-5. **WebSocket chat** (`api/routes/chat.py`) is the real-time streaming endpoint. Clients send `{"type": "message", "content": "..."}` and receive events including `tool_start`/`tool_end`. The agent's `chat()` method yields these events.
+5. **WebSocket chat** (`api/routes/chat.py`) is the real-time streaming endpoint. Clients send `{"type": "message", "content": "..."}` and receive events including `tool_start`/`tool_end`. The agent's `chat()` method yields these events. Generation runs in its own `asyncio.Task` so a client can send `{"type": "stop"}` to cancel an in-flight turn while the model is still streaming; the server then replies `{"type": "done", "cancelled": true}`. Cancelling propagates `asyncio.CancelledError` into the provider (aborting the upstream request) and the agent's `finally` persists whatever text had streamed, so history matches the transcript the client already saw. The receive loop and the generation task serialise `send_json` through a lock; `ping`/`pong` stay responsive during generation.
+
+6. **LLM retries** (`agent/providers/litellm_provider.py`): transient provider failures (a 429 rate limit on a free tier, a 5xx, or a timeout) are retried with exponential backoff, honouring a `Retry-After` header when present, for up to `ODIN_LLM_MAX_RETRIES` retries (base `ODIN_LLM_RETRY_BASE_DELAY`, cap `ODIN_LLM_RETRY_MAX_DELAY`). Retries only happen while **nothing has been streamed yet**, so they can never duplicate output; each retry emits an `LLMChunk(type="retry")` which the agent forwards as a `status` event ("Provider rate limited — retrying in Ns…"). Non-retryable errors (bad key, 4xx) fail immediately.
 
 ## Authentication (optional, for LAN / mobile)
 

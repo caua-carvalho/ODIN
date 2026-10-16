@@ -47,6 +47,8 @@ export interface PermissionResolvedEvent extends BaseEvent {
 export interface DoneEvent extends BaseEvent {
   type: 'done';
   conversation_id: string;
+  /** True when the turn ended because the client asked to stop it. */
+  cancelled?: boolean;
 }
 
 export interface ErrorEvent extends BaseEvent {
@@ -70,6 +72,6 @@ export type OdinEvent =
   | PongEvent;
 
 export interface ClientMessage {
-  type: 'message' | 'ping';
+  type: 'message' | 'ping' | 'stop';
   content?: string;
 }

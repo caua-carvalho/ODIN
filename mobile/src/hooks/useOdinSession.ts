@@ -30,6 +30,7 @@ interface UseOdinSessionReturn {
   wsConnected: boolean;
   hasConversation: boolean;
   sendMessage: (content: string) => void;
+  stopMessage: () => void;
   reloadHistory: () => void;
 }
 
@@ -215,6 +216,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
         case 'error': {
           setSessionState('error');
           setStreamError(event.message);
+          setStatusMessage(null);
           streamBufferRef.current = '';
           streamEntryIdRef.current = null;
           setTimeline((prev) =>
@@ -234,7 +236,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
     [conversationId]
   );
 
-  const { isConnected, sendMessage: wsSend } = useOdinWebSocket({
+  const { isConnected, sendMessage: wsSend, sendStop: wsStop } = useOdinWebSocket({
     conversationId,
     onEvent: handleEvent,
   });
@@ -271,6 +273,22 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
     [conversationId, wsSend, isConnected]
   );
 
+  const stopMessage = useCallback(() => {
+    if (!isConnected) {
+      // No pipe to the server: reset locally and resync from history.
+      setStatusMessage(null);
+      setSessionState('idle');
+      streamBufferRef.current = '';
+      streamEntryIdRef.current = null;
+      void reloadHistory();
+      return;
+    }
+    // Give immediate feedback; the backend replies with a cancelled "done"
+    // once the in-flight turn has been torn down (and any partial text saved).
+    setStatusMessage('Parando…');
+    wsStop();
+  }, [isConnected, wsStop, reloadHistory]);
+
   return {
     timeline,
     sessionState,
@@ -281,6 +299,7 @@ export function useOdinSession(conversationId: string | null): UseOdinSessionRet
     wsConnected: isConnected,
     hasConversation: conversationId !== null,
     sendMessage,
+    stopMessage,
     reloadHistory,
   };
 }

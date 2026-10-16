@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useKeyboardHandler } from 'react-native-keyboard-controller';
-import { ArrowLeft, RefreshCw, SendHorizonal, Loader2, AlertTriangle } from 'lucide-react-native';
+import { ArrowLeft, RefreshCw, SendHorizonal, Loader2, AlertTriangle, Square } from 'lucide-react-native';
 
 import { useOdinSession } from '../../../hooks/useOdinSession';
 import { conversationsApi } from '../../../api/conversations';
@@ -71,10 +71,15 @@ export default function ConversationScreen() {
   const session = useOdinSession(conversationId);
 
   const handleSend = useCallback(() => {
-    if (!input.trim() || session.sessionState !== 'idle') return;
+    if (!input.trim()) return;
+    if (session.sessionState !== 'idle' && session.sessionState !== 'error') return;
     session.sendMessage(input);
     setInput('');
   }, [input, session]);
+
+  const handleStop = useCallback(() => {
+    session.stopMessage();
+  }, [session]);
 
   const handleScroll = useCallback((y: number, contentHeight: number, layoutHeight: number) => {
     stickToBottomRef.current = contentHeight - y - layoutHeight < 120;
@@ -90,7 +95,9 @@ export default function ConversationScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.timeline, session.statusMessage, session.sessionState]);
 
-  const busy = session.sessionState !== 'idle';
+  // "error" is terminal but not busy: the user must be able to type and send
+  // again instead of being stuck behind a disabled input after a failed turn.
+  const busy = session.sessionState !== 'idle' && session.sessionState !== 'error';
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-surface-canvas">
@@ -106,7 +113,7 @@ export default function ConversationScreen() {
             </Text>
             <View className="flex-row items-center gap-2 mt-0.5">
               <StatusBadge status={session.wsConnected ? 'ok' : 'err'} label={session.wsConnected ? 'WS' : 'offline'} />
-              {busy ? (
+              {session.sessionState !== 'idle' ? (
                 <StatusBadge status="warn" label={SESSION_LABELS[session.sessionState] ?? session.sessionState} />
               ) : null}
             </View>
@@ -187,7 +194,7 @@ export default function ConversationScreen() {
               className="flex-1 text-sm text-primary font-mono min-h-[36px] max-h-[120px] py-0"
               placeholder={
                 busy
-                  ? 'ODIN trabalhando…'
+                  ? 'ODIN trabalhando — toque em parar…'
                   : !session.wsConnected
                     ? 'Reconectando…'
                     : 'Mensagem para o ODIN…'
@@ -200,15 +207,26 @@ export default function ConversationScreen() {
               editable={!busy}
               returnKeyType="send"
             />
-            <Button
-              size="sm"
-              variant="primary"
-              accessibilityLabel="Enviar mensagem"
-              disabled={!input.trim() || busy || !session.wsConnected}
-              onPress={handleSend}
-            >
-              <SendHorizonal size={16} color="#050505" />
-            </Button>
+            {busy ? (
+              <Button
+                size="sm"
+                variant="danger"
+                accessibilityLabel="Parar resposta"
+                onPress={handleStop}
+              >
+                <Square size={16} color="#050505" fill="#050505" />
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="primary"
+                accessibilityLabel="Enviar mensagem"
+                disabled={!input.trim() || !session.wsConnected}
+                onPress={handleSend}
+              >
+                <SendHorizonal size={16} color="#050505" />
+              </Button>
+            )}
           </View>
           {!session.wsConnected && conversationId ? (
             <Text className="text-[11px] text-err mt-1 font-mono">

@@ -13,6 +13,7 @@ interface UseOdinWebSocketOptions {
 interface UseOdinWebSocketReturn {
   isConnected: boolean;
   sendMessage: (content: string) => void;
+  sendStop: () => void;
   sendPing: () => void;
   error: Error | null;
 }
@@ -153,6 +154,13 @@ export function useOdinWebSocket({
     }
   }, []);
 
+  const sendStop = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      const message: ClientMessage = { type: 'stop' };
+      wsRef.current.send(JSON.stringify(message));
+    }
+  }, []);
+
   const sendPing = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
@@ -175,6 +183,7 @@ export function useOdinWebSocket({
   return {
     isConnected,
     sendMessage,
+    sendStop,
     sendPing,
     error,
   };

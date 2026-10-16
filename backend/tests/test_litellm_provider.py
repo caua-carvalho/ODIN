@@ -12,6 +12,7 @@ import inspect
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,7 +32,11 @@ from app.agent.providers.litellm_provider import (
     _build_messages,
     _build_tools,
     _finalize_tool_calls,
+    _is_retryable,
     _merge_tool_call_fragment,
+    _retry_after,
+    _retry_delay,
+    _short_error,
 )
 from app.config import Settings
 
@@ -352,3 +357,156 @@ class TestGenerate:
         ):
             pass
         assert "tools" not in fake.captured
+
+
+# ---------------------------------------------------------------------------
+# Transient-failure detection
+# ---------------------------------------------------------------------------
+class _RateLimitError(Exception):
+    """Duck-typed stand-in for a provider 429."""
+
+    def __init__(self, message="rate limit exceeded", status_code=429, retry_after=None):
+        super().__init__(message)
+        self.status_code = status_code
+        if retry_after is not None:
+            self.response = SimpleNamespace(headers={"retry-after": str(retry_after)})
+
+
+class TestRetryDetection:
+    def test_status_code_429_is_retryable(self):
+        assert _is_retryable(_RateLimitError())
+
+    def test_5xx_message_is_retryable(self):
+        assert _is_retryable(Exception("503 Service Unavailable"))
+
+    def test_connection_error_name_is_retryable(self):
+        class APIConnectionError(Exception):
+            pass
+
+        assert _is_retryable(APIConnectionError("socket closed"))
+
+    def test_client_error_is_not_retryable(self):
+        assert not _is_retryable(ValueError("invalid api key"))
+
+    def test_retry_after_is_parsed(self):
+        assert _retry_after(_RateLimitError(retry_after=7)) == 7.0
+        assert _retry_after(_RateLimitError()) is None
+
+    def test_retry_delay_honours_retry_after(self):
+        assert _retry_delay(_RateLimitError(retry_after=5), 2, 1.0, 30.0) == 5.0
+
+    def test_retry_delay_is_capped(self):
+        assert _retry_delay(_RateLimitError(retry_after=600), 1, 1.0, 30.0) == 30.0
+
+    def test_short_error_labels_rate_limit(self):
+        assert _short_error(_RateLimitError()) == "rate limited"
+
+
+# ---------------------------------------------------------------------------
+# generate() retry behaviour
+# ---------------------------------------------------------------------------
+class _FlakyLitellm:
+    """acompletion raises queued errors before finally streaming chunks."""
+
+    def __init__(self, chunks, errors=()):
+        self._chunks = chunks
+        self._errors = list(errors)
+        self.calls = 0
+
+    async def acompletion(self, **kwargs):
+        self.calls += 1
+        if self._errors:
+            raise self._errors.pop(0)
+
+        async def _gen():
+            for chunk in self._chunks:
+                yield chunk
+
+        return _gen()
+
+
+class _StreamThenFail:
+    """Streams one chunk, then raises (models a mid-stream failure)."""
+
+    def __init__(self, chunk, exc):
+        self._chunk = chunk
+        self._exc = exc
+
+    async def acompletion(self, **kwargs):
+        async def _gen():
+            yield self._chunk
+            raise self._exc
+
+        return _gen()
+
+
+def _retry_provider(**kwargs):
+    return LiteLLMProvider(
+        model="m",
+        provider="groq",
+        max_retries=3,
+        retry_base_delay=0.0,
+        retry_max_delay=0.0,
+        **kwargs,
+    )
+
+
+async def _collect(provider):
+    return [
+        chunk
+        async for chunk in provider.generate(
+            messages=[LLMMessage(role="user", content="hi")],
+            tools=[],
+            system="",
+        )
+    ]
+
+
+class TestRetryBehaviour:
+    async def test_retries_rate_limit_then_succeeds(self, monkeypatch):
+        fake = _FlakyLitellm(
+            [_FakeChunk(delta=_FakeDelta(content="hello"))], [_RateLimitError()]
+        )
+        monkeypatch.setattr(mod, "_loaded_litellm", fake)
+
+        out = await _collect(_retry_provider())
+
+        assert [c.type for c in out] == ["retry", "text", "done"]
+        assert out[0].retry_after is not None
+        assert "rate limited" in out[0].content
+        assert fake.calls == 2
+
+    async def test_gives_up_after_max_retries(self, monkeypatch):
+        fake = _FlakyLitellm([], [_RateLimitError(), _RateLimitError()])
+        monkeypatch.setattr(mod, "_loaded_litellm", fake)
+        provider = LiteLLMProvider(
+            model="m",
+            provider="groq",
+            max_retries=1,
+            retry_base_delay=0.0,
+            retry_max_delay=0.0,
+        )
+
+        out = await _collect(provider)
+
+        assert [c.type for c in out] == ["retry", "error"]
+        assert fake.calls == 2  # first attempt + one retry
+
+    async def test_does_not_retry_client_errors(self, monkeypatch):
+        fake = _FlakyLitellm([], [ValueError("invalid api key")])
+        monkeypatch.setattr(mod, "_loaded_litellm", fake)
+
+        out = await _collect(_retry_provider())
+
+        assert [c.type for c in out] == ["error"]
+        assert fake.calls == 1
+
+    async def test_does_not_retry_after_text_streamed(self, monkeypatch):
+        fake = _StreamThenFail(
+            _FakeChunk(delta=_FakeDelta(content="partial")), _RateLimitError()
+        )
+        monkeypatch.setattr(mod, "_loaded_litellm", fake)
+
+        out = await _collect(_retry_provider())
+
+        assert [c.type for c in out] == ["text", "error"]

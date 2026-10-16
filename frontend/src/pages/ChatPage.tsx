@@ -19,6 +19,7 @@ import {
   Loader2,
   AlertTriangle,
   SendHorizonal,
+  Square,
   RefreshCw,
 } from 'lucide-react';
 import type { Conversation } from '../types/conversation';
@@ -113,11 +114,17 @@ export function ChatPage() {
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!conversationId || !input.trim() || session.sessionState !== 'idle') return;
+    if (!conversationId || !input.trim()) return;
+    if (session.sessionState !== 'idle' && session.sessionState !== 'error') return;
     setSending(true);
     session.sendMessage(input);
     setInput('');
     setSending(false);
+  };
+
+  const handleStop = () => {
+    if (session.sessionState === 'idle') return;
+    session.stopMessage();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -157,6 +164,9 @@ export function ChatPage() {
   });
 
   const activeConv = conversations.data?.find((c) => c.id === conversationId);
+  // "error" is terminal but not busy: the user must be able to type again
+  // instead of being stuck behind a disabled input after a failed turn.
+  const busy = session.sessionState !== 'idle' && session.sessionState !== 'error';
 
   return (
     <div className="flex h-full gap-4 max-w-[1600px] mx-auto">
@@ -388,24 +398,37 @@ export function ChatPage() {
                 placeholder={
                   !conversationId
                     ? 'Select a session to start...'
-                    : session.sessionState !== 'idle'
-                      ? 'ODIN is working...'
+                    : busy
+                      ? 'ODIN is working — press stop to interrupt...'
                       : 'Message ODIN...'
                 }
-                disabled={!conversationId || session.sessionState !== 'idle'}
+                disabled={!conversationId || busy}
                 rows={2}
                 className="flex-1 bg-transparent text-sm text-primary placeholder-muted resize-none focus:outline-none min-h-[40px] max-h-32 font-mono disabled:cursor-not-allowed disabled:opacity-60"
                 aria-label="Message ODIN"
               />
-              <Button
-                type="submit"
-                size="sm"
-                disabled={!conversationId || !input.trim() || session.sessionState !== 'idle'}
-                loading={sending}
-                aria-label="Send message"
-              >
-                <SendHorizonal className="w-4 h-4" aria-hidden="true" />
-              </Button>
+              {busy ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="danger"
+                  onClick={handleStop}
+                  aria-label="Stop response"
+                  title="Stop response"
+                >
+                  <Square className="w-3.5 h-3.5" fill="currentColor" aria-hidden="true" />
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!conversationId || !input.trim()}
+                  loading={sending}
+                  aria-label="Send message"
+                >
+                  <SendHorizonal className="w-4 h-4" aria-hidden="true" />
+                </Button>
+              )}
             </div>
             <p className="text-xs text-muted mt-1.5 font-mono">
               Enter sends · Shift+Enter newline · Ctrl+Enter send · <kbd className="kbd">⌘K</kbd> commands

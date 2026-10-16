@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -87,141 +88,169 @@ class OdinAgent:
 
         # Agentic loop
         full_response_text = ""
+        text_buffer = ""
         max_iterations = 10  # prevent infinite loops
+        saved = False
 
-        for iteration in range(max_iterations):
-            logger.info(f"Agent iteration {iteration + 1} for conversation {conversation_id}")
+        try:
+            for iteration in range(max_iterations):
+                logger.info(f"Agent iteration {iteration + 1} for conversation {conversation_id}")
 
-            text_buffer = ""
-            tool_calls_this_turn: list[LLMToolCall] = []
+                text_buffer = ""
+                tool_calls_this_turn: list[LLMToolCall] = []
 
-            async for chunk in self.provider.generate(
-                messages=llm_messages,
-                tools=tool_definitions,
-                system=system_prompt,
-            ):
-                if chunk.type == "text":
-                    text_buffer += chunk.content or ""
-                    yield {"type": "text_chunk", "content": chunk.content}
+                async for chunk in self.provider.generate(
+                    messages=llm_messages,
+                    tools=tool_definitions,
+                    system=system_prompt,
+                ):
+                    if chunk.type == "text":
+                        text_buffer += chunk.content or ""
+                        yield {"type": "text_chunk", "content": chunk.content}
 
-                elif chunk.type == "tool_call":
-                    tool_calls_this_turn.append(
-                        LLMToolCall(
-                            id=chunk.tool_call_id or str(uuid.uuid4()),
-                            name=chunk.tool_name or "",
-                            arguments=chunk.tool_arguments or {},
-                            metadata=chunk.metadata,
+                    elif chunk.type == "tool_call":
+                        tool_calls_this_turn.append(
+                            LLMToolCall(
+                                id=chunk.tool_call_id or str(uuid.uuid4()),
+                                name=chunk.tool_name or "",
+                                arguments=chunk.tool_arguments or {},
+                                metadata=chunk.metadata,
+                            )
                         )
-                    )
 
-                elif chunk.type == "error":
-                    logger.error(f"LLM error: {chunk.error}")
-                    yield {"type": "error", "message": chunk.error}
-                    # Save whatever we have and stop
-                    if text_buffer:
-                        await self._save_assistant_message(
-                            conversation_id, text_buffer, []
-                        )
-                    return
-
-                elif chunk.type == "done":
-                    break
-
-            # Add assistant response to context
-            if text_buffer or tool_calls_this_turn:
-                llm_messages.append(
-                    LLMMessage(
-                        role="assistant",
-                        content=text_buffer,
-                        tool_calls=tool_calls_this_turn if tool_calls_this_turn else None,
-                    )
-                )
-                full_response_text += text_buffer
-
-            # No tool calls → we're done
-            if not tool_calls_this_turn:
-                break
-
-            # Execute tool calls
-            for tc in tool_calls_this_turn:
-                tool_name = tc.name
-                tool_args = tc.arguments
-                call_id = tc.id
-
-                logger.info(f"Tool call: {tool_name}({json.dumps(tool_args)[:100]})")
-
-                yield {
-                    "type": "tool_start",
-                    "tool": tool_name,
-                    "tool_call_id": call_id,
-                    "arguments": tool_args,
-                }
-
-                tool = self.tool_registry.get(tool_name)
-                if not tool:
-                    result_content = json.dumps(
-                        {"error": f"Unknown tool: {tool_name}"}
-                    )
-                    yield {
-                        "type": "tool_end",
-                        "tool": tool_name,
-                        "tool_call_id": call_id,
-                        "success": False,
-                        "result": {"error": f"Unknown tool: {tool_name}"},
-                    }
-                else:
-                    try:
-                        result = await tool.execute(tool_args, conversation_id)
-
-                        if result.requires_approval and not result.success:
-                            yield {
-                                "type": "status",
-                                "message": "Waiting for authorization...",
-                            }
-
-                        result_dict = result.model_dump()
-                        result_content = json.dumps(result_dict)
-
+                    elif chunk.type == "retry":
+                        # Transient provider failure (e.g. a 429 on a free tier)
+                        # is being retried by the provider; keep the user posted.
                         yield {
-                            "type": "tool_end",
-                            "tool": tool_name,
-                            "tool_call_id": call_id,
-                            "success": result.success,
-                            "result": result_dict,
+                            "type": "status",
+                            "message": chunk.content or "Retrying…",
                         }
 
-                    except Exception as e:
-                        logger.error(f"Tool {tool_name} raised exception: {e}", exc_info=True)
-                        result_content = json.dumps({"error": str(e)})
+                    elif chunk.type == "error":
+                        logger.error(f"LLM error: {chunk.error}")
+                        yield {"type": "error", "message": chunk.error}
+                        return
+
+                    elif chunk.type == "done":
+                        break
+
+                # Add assistant response to context
+                if text_buffer or tool_calls_this_turn:
+                    llm_messages.append(
+                        LLMMessage(
+                            role="assistant",
+                            content=text_buffer,
+                            tool_calls=tool_calls_this_turn if tool_calls_this_turn else None,
+                        )
+                    )
+                    full_response_text += text_buffer
+                    # Reset so the abort handler below never double-counts this
+                    # turn if the turn is cancelled during tool execution.
+                    text_buffer = ""
+
+                # No tool calls → we're done
+                if not tool_calls_this_turn:
+                    break
+
+                # Execute tool calls
+                for tc in tool_calls_this_turn:
+                    tool_name = tc.name
+                    tool_args = tc.arguments
+                    call_id = tc.id
+
+                    logger.info(f"Tool call: {tool_name}({json.dumps(tool_args)[:100]})")
+
+                    yield {
+                        "type": "tool_start",
+                        "tool": tool_name,
+                        "tool_call_id": call_id,
+                        "arguments": tool_args,
+                    }
+
+                    tool = self.tool_registry.get(tool_name)
+                    if not tool:
+                        result_content = json.dumps(
+                            {"error": f"Unknown tool: {tool_name}"}
+                        )
                         yield {
                             "type": "tool_end",
                             "tool": tool_name,
                             "tool_call_id": call_id,
                             "success": False,
-                            "result": {"error": str(e)},
+                            "result": {"error": f"Unknown tool: {tool_name}"},
                         }
+                    else:
+                        try:
+                            result = await tool.execute(tool_args, conversation_id)
 
-                # Add tool result to context
-                llm_messages.append(
-                    LLMMessage(
-                        role="tool",
-                        content=result_content,
-                        tool_call_id=call_id,
-                        tool_name=tool_name,
+                            if result.requires_approval and not result.success:
+                                yield {
+                                    "type": "status",
+                                    "message": "Waiting for authorization...",
+                                }
+
+                            result_dict = result.model_dump()
+                            result_content = json.dumps(result_dict)
+
+                            yield {
+                                "type": "tool_end",
+                                "tool": tool_name,
+                                "tool_call_id": call_id,
+                                "success": result.success,
+                                "result": result_dict,
+                            }
+
+                        except Exception as e:
+                            logger.error(f"Tool {tool_name} raised exception: {e}", exc_info=True)
+                            result_content = json.dumps({"error": str(e)})
+                            yield {
+                                "type": "tool_end",
+                                "tool": tool_name,
+                                "tool_call_id": call_id,
+                                "success": False,
+                                "result": {"error": str(e)},
+                            }
+
+                    # Add tool result to context
+                    llm_messages.append(
+                        LLMMessage(
+                            role="tool",
+                            content=result_content,
+                            tool_call_id=call_id,
+                            tool_name=tool_name,
+                        )
                     )
+
+                    yield {"type": "status", "message": "Thinking..."}
+
+            # Save final assistant message to DB
+            if full_response_text:
+                await self._save_assistant_message(
+                    conversation_id, full_response_text, []
                 )
+                saved = True
+                # Update conversation title if it's the first exchange
+                await self._maybe_update_title(conversation_id, message)
 
-                yield {"type": "status", "message": "Thinking..."}
+            yield {"type": "done", "conversation_id": conversation_id}
 
-        # Save final assistant message to DB
-        if full_response_text:
-            await self._save_assistant_message(
-                conversation_id, full_response_text, []
-            )
-            # Update conversation title if it's the first exchange
-            await self._maybe_update_title(conversation_id, message)
-
-        yield {"type": "done", "conversation_id": conversation_id}
+        finally:
+            # Persist whatever streamed when the turn is aborted — the user
+            # pressed "stop", the socket dropped, or the app is shutting down —
+            # so history matches the transcript the client already saw.
+            if not saved:
+                partial = f"{full_response_text}{text_buffer}".strip()
+                if partial:
+                    try:
+                        await self._save_assistant_message(
+                            conversation_id, partial, []
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # pragma: no cover - best effort
+                        logger.warning(
+                            f"Could not persist partial assistant message: {exc}"
+                        )
 
     async def _ensure_conversation(self, db: AsyncSession, conversation_id: str) -> None:
         result = await db.execute(

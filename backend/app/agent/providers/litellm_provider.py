@@ -22,8 +22,10 @@ regenerate it for a LiteLLM provider.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import random
 import uuid
 from typing import Any, AsyncIterator
 
@@ -79,6 +81,130 @@ def _get(obj: Any, key: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
+
+
+# ---------------------------------------------------------------------------
+# Transient-failure detection (rate limits / 5xx / timeouts)
+# ---------------------------------------------------------------------------
+# HTTP statuses worth retrying. 429 is the common one on free tiers; the 5xx
+# family is the provider having a bad moment.
+_RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+
+# Exception class names used by LiteLLM / httpx / openai for transient errors.
+# Matching by name keeps this module free of a hard dependency on those packages
+# (LiteLLM is imported lazily and may not even be loaded here).
+_RETRYABLE_EXCEPTION_NAMES = {
+    "RateLimitError",
+    "Timeout",
+    "TimeoutError",
+    "APITimeoutError",
+    "APIConnectionError",
+    "ConnectionError",
+    "ServiceUnavailableError",
+    "InternalServerError",
+}
+
+# Last-resort substring match for providers that only expose a message.
+_RETRYABLE_MESSAGE_MARKERS = (
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "429",
+    "too many requests",
+    "quota",
+    "overloaded",
+    "over capacity",
+    "temporarily unavailable",
+    "timed out",
+    "timeout",
+    "connection error",
+    "connection reset",
+    "server error",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+)
+
+
+def _status_code(exc: Exception) -> int | None:
+    """Best-effort HTTP status extraction across provider/HTTP exception shapes."""
+    for attr in ("status_code", "http_status", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(exc, "response", None)
+    value = getattr(response, "status_code", None)
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Whether a failed request is transient and worth reissuing."""
+    if _status_code(exc) in _RETRYABLE_STATUS:
+        return True
+    if type(exc).__name__ in _RETRYABLE_EXCEPTION_NAMES:
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _RETRYABLE_MESSAGE_MARKERS)
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """Read a ``Retry-After`` delay (seconds) from the error, if advertised."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        headers = getattr(exc, "headers", None)
+    if not headers:
+        return None
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    except (AttributeError, TypeError):
+        return None
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_delay(
+    exc: Exception, attempt: int, base_delay: float, max_delay: float
+) -> float:
+    """Delay before retry number ``attempt`` (1-based), honouring Retry-After.
+
+    Falls back to exponential backoff with a little jitter so parallel clients
+    do not retry in lockstep.
+    """
+    after = _retry_after(exc)
+    if after is not None:
+        return min(after, max_delay)
+    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+    return delay * random.uniform(0.8, 1.2)
+
+
+def _short_error(exc: Exception) -> str:
+    """A terse, user-facing reason used in the retry status note."""
+    status = _status_code(exc)
+    if status == 429:
+        return "rate limited"
+    if status is not None:
+        return f"HTTP {status}"
+    return type(exc).__name__ or "request failed"
+
+
+async def _close_stream(response: Any) -> None:
+    """Close a LiteLLM stream, aborting an in-flight request. Best effort."""
+    aclose = getattr(response, "aclose", None)
+    if not callable(aclose):
+        return
+    try:
+        await aclose()
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # pragma: no cover - best effort
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +355,9 @@ class LiteLLMProvider:
         api_key: str | None = None,
         api_base: str | None = None,
         litellm_model: str | None = None,
+        max_retries: int = 3,
+        retry_base_delay: float = 1.0,
+        retry_max_delay: float = 30.0,
     ) -> None:
         self.provider = (provider or "").strip().lower()
         self.model = model
@@ -237,6 +366,10 @@ class LiteLLMProvider:
         self.litellm_model = litellm_model or (
             f"{self.provider}/{model}" if self.provider else model
         )
+        # Retries after the first attempt; 3 means up to 4 requests.
+        self.max_retries = max(0, int(max_retries))
+        self.retry_base_delay = max(0.0, float(retry_base_delay))
+        self.retry_max_delay = max(0.0, float(retry_max_delay))
         logger.info(f"LiteLLMProvider initialized: {self.litellm_model}")
 
     @classmethod
@@ -273,6 +406,9 @@ class LiteLLMProvider:
             api_key=api_key,
             api_base=api_base,
             litellm_model=litellm_model,
+            max_retries=getattr(config, "odin_llm_max_retries", 3),
+            retry_base_delay=getattr(config, "odin_llm_retry_base_delay", 1.0),
+            retry_max_delay=getattr(config, "odin_llm_retry_max_delay", 30.0),
         )
 
     async def generate(
@@ -281,7 +417,13 @@ class LiteLLMProvider:
         tools: list[LLMTool],
         system: str,
     ) -> AsyncIterator[LLMChunk]:
-        """Stream a response from LiteLLM, yielding normalized chunks."""
+        """Stream a response from LiteLLM, yielding normalized chunks.
+
+        Transient failures (rate limit, 5xx, timeout) are retried with backoff
+        while nothing has been streamed yet, so a retry can never duplicate
+        output. Each retry emits a ``retry`` chunk first so the UI can explain
+        the wait.
+        """
         litellm = _get_litellm()
 
         kwargs: dict[str, Any] = {
@@ -298,36 +440,86 @@ class LiteLLMProvider:
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        tool_states: dict[int, dict] = {}
+        attempt = 0
+        while True:
+            attempt += 1
+            emitted = False
+            tool_states: dict[int, dict] = {}
+            response = None
 
-        try:
-            response = await litellm.acompletion(**kwargs)
+            try:
+                response = await litellm.acompletion(**kwargs)
 
-            async for chunk in response:
-                choices = _get(chunk, "choices") or []
-                if not choices:
-                    # Usage-only or empty keep-alive chunk.
-                    usage = _get(chunk, "usage")
-                    if usage:
-                        logger.debug(f"LLM usage: {usage}")
+                async for chunk in response:
+                    choices = _get(chunk, "choices") or []
+                    if not choices:
+                        # Usage-only or empty keep-alive chunk.
+                        usage = _get(chunk, "usage")
+                        if usage:
+                            logger.debug(f"LLM usage: {usage}")
+                        continue
+
+                    delta = _get(choices[0], "delta")
+                    if delta is None:
+                        continue
+
+                    content = _get(delta, "content")
+                    if content:
+                        emitted = True
+                        yield LLMChunk(type="text", content=content)
+
+                    for tc_delta in _get(delta, "tool_calls") or []:
+                        # Any parsed fragment makes the response non-restartable.
+                        emitted = True
+                        _merge_tool_call_fragment(tool_states, tc_delta, delta)
+
+                for tool_chunk in _finalize_tool_calls(tool_states):
+                    yield tool_chunk
+
+                yield LLMChunk(type="done")
+                return
+
+            except asyncio.CancelledError:
+                # The user (or the socket) aborted the turn: never retry.
+                raise
+            except Exception as exc:
+                if (
+                    not emitted
+                    and attempt <= self.max_retries
+                    and _is_retryable(exc)
+                ):
+                    # Release the failed stream before waiting.
+                    if response is not None:
+                        await _close_stream(response)
+                        response = None
+                    delay = _retry_delay(
+                        exc, attempt, self.retry_base_delay, self.retry_max_delay
+                    )
+                    logger.warning(
+                        "LiteLLM request failed (attempt %s/%s), retrying in %.1fs: %s",
+                        attempt,
+                        self.max_retries + 1,
+                        delay,
+                        exc,
+                    )
+                    yield LLMChunk(
+                        type="retry",
+                        content=(
+                            f"Provider {_short_error(exc)} — "
+                            f"retrying in {max(1, round(delay))}s "
+                            f"({attempt}/{self.max_retries})…"
+                        ),
+                        retry_after=delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
 
-                delta = _get(choices[0], "delta")
-                if delta is None:
-                    continue
+                logger.error(f"LiteLLM generation error: {exc}", exc_info=True)
+                yield LLMChunk(type="error", error=str(exc))
+                return
 
-                content = _get(delta, "content")
-                if content:
-                    yield LLMChunk(type="text", content=content)
-
-                for tc_delta in _get(delta, "tool_calls") or []:
-                    _merge_tool_call_fragment(tool_states, tc_delta, delta)
-
-            for tool_chunk in _finalize_tool_calls(tool_states):
-                yield tool_chunk
-
-            yield LLMChunk(type="done")
-
-        except Exception as exc:
-            logger.error(f"LiteLLM generation error: {exc}", exc_info=True)
-            yield LLMChunk(type="error", error=str(exc))
+            finally:
+                # Closing the stream aborts an in-flight request (e.g. after a
+                # cancellation) and releases the upstream connection.
+                if response is not None:
+                    await _close_stream(response)

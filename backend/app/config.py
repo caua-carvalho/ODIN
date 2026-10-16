@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # responses/tool calls with thinking enabled, so the default is false.
     ollama_think: bool = False
 
+    # Resilience. Transient provider failures (a 429 rate limit on a free tier,
+    # a 5xx, or a timeout) are retried with exponential backoff before the turn
+    # is abandoned. Only applies while nothing has been streamed yet, so a retry
+    # can never duplicate output. `max_retries` counts retries after the first
+    # attempt, so 3 means up to 4 requests.
+    odin_llm_max_retries: int = 3
+    odin_llm_retry_base_delay: float = 1.0
+    odin_llm_retry_max_delay: float = 30.0
+
     # Daily briefing
     odin_weather_city: str = "São José dos Campos"
     odin_weather_lat: float = -23.1794
