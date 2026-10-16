@@ -18,6 +18,8 @@ from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
 from app.tools.projects.tools import create_project_tools
+from app.agent.mcp.manager import mcp_manager
+from app.agent.mcp.tool import create_mcp_tools
 from app.security.path_guard import PathGuard
 from app.security.policy import SecurityPolicy
 from app.security.auth import TokenAuthMiddleware, _FailureLimiter
@@ -91,6 +93,17 @@ async def lifespan(app: FastAPI):
     for project_tool in create_project_tools(security_policy):
         tool_registry.register(project_tool)
 
+    # Register tools from configured MCP servers. Optional and non-fatal: with
+    # no servers configured (or the `mcp` SDK missing) this is a no-op, and a
+    # server that fails to connect is reported in /api/mcp instead of stopping
+    # the boot. Each tool still passes through the security gate when called.
+    try:
+        await mcp_manager.start()
+        for mcp_tool in create_mcp_tools(mcp_manager, security_policy, ws_manager):
+            tool_registry.register(mcp_tool)
+    except Exception as exc:
+        logger.warning("MCP initialization failed; continuing without MCP tools: %s", exc)
+
     logger.info(f"Registered {len(tool_registry)} tools: {tool_registry.names()}")
 
     # Initialize LLM provider (selection lives in providers/factory.py)
@@ -122,6 +135,7 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Odin shutting down...")
+    await mcp_manager.stop()
 
 
 app = FastAPI(
