@@ -18,6 +18,11 @@ non-secret data: an expiry and a random id.
 
 The signing secret is ``ODIN_SESSION_SECRET`` when set, otherwise it falls back
 to ``ODIN_API_TOKEN`` (so no extra configuration is required to get started).
+
+A value that is public (it shipped in a versioned example file) or an obvious
+placeholder must never sign sessions, because anyone could forge a valid panel
+session with it. :func:`insecure_session_secret_reason` flags those values so
+startup can warn loudly (issue #13).
 """
 from __future__ import annotations
 
@@ -33,6 +38,46 @@ from app.config import settings
 
 # Bump to invalidate every previously issued session token.
 ALGORITHM_LABEL = "odin-session-v1"
+
+# Secrets that must never sign a session. Compared case-insensitively against
+# the *stripped* configured value. The first entry was published in
+# .env.production.example until 2026-10-16 (issue #13): it is public, so a
+# session signed with it can be forged by anyone who reads the repository.
+INSECURE_SESSION_SECRETS = frozenset(
+    {
+        "7f5827afb14389eb0ef7a93d81c9306b0e3d93742105d99c8bae93899c158ba0",
+        # Placeholders used across the shipped examples.
+        "change-me-to-a-long-random-string",
+        "change-me-long-random-string",
+        "changeme",
+        "change-me",
+        "your-session-secret-here",
+        "your-token-here",
+        "secret",
+        "placeholder",
+    }
+)
+
+
+def insecure_session_secret_reason(secret: str | None) -> str | None:
+    """Return why ``secret`` is unsafe to sign sessions with, else ``None``.
+
+    An empty value is fine: the signer falls back to ``ODIN_API_TOKEN``. This
+    only flags values that are known to be public (previously published in the
+    repository) or well-known placeholders — a strong random secret passes.
+    """
+    value = (secret or "").strip()
+    if not value:
+        return None
+    if value.lower() in INSECURE_SESSION_SECRETS:
+        return (
+            "the panel session signing secret is a public/placeholder value "
+            "(it ships or shipped in the repository), so anyone can forge a "
+            "panel session. Generate a new one with `openssl rand -hex 32` and "
+            "restart. Rotating it invalidates all existing panel sessions."
+        )
+    return None
+
 
 
 def _b64url_encode(raw: bytes) -> str:

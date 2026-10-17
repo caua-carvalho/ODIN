@@ -4,6 +4,7 @@ Covers the stateless session tokens minted by ``POST /api/auth/login`` and the
 middleware that accepts them alongside the raw ``ODIN_API_TOKEN``.
 """
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -162,6 +163,101 @@ class TestLoginEndpoint:
             "/api/secret", headers={"Authorization": f"Bearer {expired}"}
         )
         assert response.status_code == 401
+
+
+class TestInsecureSecretDetection:
+    """The panel session secret must never be a published/placeholder value."""
+
+    def test_published_secret_is_flagged(self):
+        from app.security.session import insecure_session_secret_reason
+
+        published = "7f5827afb14389eb0ef7a93d81c9306b0e3d93742105d99c8bae93899c158ba0"
+        reason = insecure_session_secret_reason(published)
+        assert reason is not None
+        assert "openssl rand -hex 32" in reason
+
+    def test_placeholder_values_are_flagged(self):
+        from app.security.session import insecure_session_secret_reason
+
+        for value in ("change-me-to-a-long-random-string", "CHANGEME", " secret "):
+            assert insecure_session_secret_reason(value) is not None
+
+    def test_empty_is_allowed_derived_from_token(self):
+        from app.security.session import insecure_session_secret_reason
+
+        assert insecure_session_secret_reason("") is None
+        assert insecure_session_secret_reason(None) is None
+
+    def test_strong_random_value_passes(self):
+        from app.security.session import insecure_session_secret_reason
+
+        assert insecure_session_secret_reason(secrets.token_hex(32)) is None
+
+    def test_startup_logs_a_warning(self, monkeypatch, caplog):
+        from app import main as main_mod
+        from app.config import settings
+
+        monkeypatch.setattr(
+            settings,
+            "odin_session_secret",
+            "7f5827afb14389eb0ef7a93d81c9306b0e3d93742105d99c8bae93899c158ba0",
+        )
+        with caplog.at_level("WARNING", logger="odin.main"):
+            main_mod._check_session_secret_security()
+        assert any("INSECURE CONFIGURATION" in r.message for r in caplog.records)
+        assert any("ODIN_SESSION_SECRET" in r.message for r in caplog.records)
+
+    def test_startup_flags_a_placeholder_api_token(self, monkeypatch, caplog):
+        # With no session secret the signer derives from ODIN_API_TOKEN.
+        from app import main as main_mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "odin_session_secret", "")
+        monkeypatch.setattr(
+            settings, "odin_api_token", "change-me-to-a-long-random-string"
+        )
+        with caplog.at_level("WARNING", logger="odin.main"):
+            main_mod._check_session_secret_security()
+        assert any("ODIN_API_TOKEN" in r.message for r in caplog.records)
+
+    def test_startup_is_quiet_for_a_good_secret(self, monkeypatch, caplog):
+        from app import main as main_mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "odin_session_secret", secrets.token_hex(32))
+        with caplog.at_level("WARNING", logger="odin.main"):
+            main_mod._check_session_secret_security()
+        assert not caplog.records
+
+
+class TestVersionedExamplesHaveNoSecrets:
+    """Regression: shipped examples must not contain usable secrets (issue #13)."""
+
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    EXAMPLES = (".env.example", ".env.production.example")
+
+    def _secret_lines(self):
+        import re
+
+        pattern = re.compile(r"^\s*[A-Z_]*(?:SECRET|TOKEN|PASSWORD)[A-Z_]*=(.*)$")
+        for name in self.EXAMPLES:
+            for line in (self.REPO_ROOT / name).read_text(encoding="utf-8").splitlines():
+                match = pattern.match(line)
+                if match:
+                    yield name, line, match.group(1).strip()
+
+    def test_no_long_hex_values(self):
+        import re
+
+        for name, line, value in self._secret_lines():
+            assert not re.fullmatch(r"[0-9a-fA-F]{32,}", value), (
+                f"{name}: {line!r} looks like a real secret"
+            )
+
+    def test_session_secret_is_empty_in_production_example(self):
+        text = (self.REPO_ROOT / ".env.production.example").read_text(encoding="utf-8")
+        assert "ODIN_SESSION_SECRET=\n" in text
+        assert "openssl rand -hex 32" in text
 
 
 class TestDisabledAuth:

@@ -60,6 +60,26 @@ def _enforce_exposure_guard() -> None:
     )
 
 
+def _check_session_secret_security() -> None:
+    """Warn when the panel session signing secret is public or a placeholder.
+
+    A published/placeholder secret lets anyone forge a signed panel session
+    without the API token (issue #13). The signer uses ``ODIN_SESSION_SECRET``
+    when set, otherwise ``ODIN_API_TOKEN``, so both are checked. This only warns
+    — refusing to boot would lock out a host that copied the example — but it is
+    logged at WARNING level on every startup so it cannot go unnoticed.
+    """
+    from app.security.session import insecure_session_secret_reason
+
+    source = "ODIN_SESSION_SECRET"
+    secret = settings.odin_session_secret
+    if not secret:
+        source, secret = "ODIN_API_TOKEN", settings.odin_api_token
+    reason = insecure_session_secret_reason(secret)
+    if reason:
+        logger.warning("INSECURE CONFIGURATION: %s: %s", source, reason)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
@@ -69,6 +89,9 @@ async def lifespan(app: FastAPI):
 
     # Fail fast on an unsafe public bind before doing anything else.
     _enforce_exposure_guard()
+
+    # Warn (do not fail) when the session signing secret is compromised.
+    _check_session_secret_security()
 
     # Ensure workspace exists
     workspace_path = Path(settings.odin_workspace)
