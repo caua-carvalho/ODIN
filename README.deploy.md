@@ -128,18 +128,62 @@ WebSocket já funciona pelo túnel sem configuração extra (o chat usa
 
 ## Rodar como serviço (systemd de sistema)
 
-O unit de hosting reinicia sozinho e roda como usuário dedicado:
+O unit de hosting reinicia sozinho e já vem **endurecido**: `ProtectSystem=strict`
+(raiz de arquivos somente leitura), `ProtectHome`, `PrivateDevices`,
+`RestrictNamespaces`, sem capabilities, `UMask=0077` e mais. Só o repositório e o
+workspace ficam graváveis (`ReadWritePaths`).
 
 ```bash
 sudo ./scripts/install-service.sh                 # usa ODIN_WORKSPACE do .env
 # ou: sudo ./scripts/install-service.sh --user odin --workspace /var/lib/odin/workspace
+./scripts/install-service.sh --print              # pré-visualiza o unit, sem sudo
 systemctl status odin.service
 journalctl -u odin.service -f
+systemd-analyze security odin.service             # nota de exposição
 ```
 
 > Não confunda com `scripts/install-autostart.sh`, que instala um unit
 > `--user` para uso **local** (desktop/Hyprland). Use o `install-service.sh`
 > para hospedagem.
+
+### Usuário dedicado
+
+O padrão é rodar como o usuário que invocou o `sudo` (prático em dev). Para
+separar privilégios na hospedagem, crie uma conta dedicada e aponte o unit para
+ela:
+
+```bash
+sudo useradd --system --home /var/lib/odin --create-home --shell /usr/sbin/nologin odin
+sudo chown -R odin:odin . backend/.venv        # repo precisa ser legível/executável
+sudo ./scripts/install-service.sh --user odin --workspace /var/lib/odin/workspace
+```
+
+O instalador escolhe `ProtectHome=true` (esconde `/home`, `/root` e `/run/user`)
+quando o repositório e o workspace **não** estão sob `$HOME`; caso contrário usa
+`ProtectHome=read-only`, porque `ReadWritePaths` não consegue abrir exceção
+dentro de um `/home` escondido. Ele também adiciona a `ReadWritePaths` o
+diretório de um `DATABASE_URL`/`ODIN_MEMORY_PATH` absoluto (senão
+`ProtectSystem=strict` bloquearia a escrita do banco).
+
+### O que o sandbox custa
+
+Diretivas **de propósito não** aplicadas, para não conflitar com a função do
+Odin (que executa comandos):
+
+| Diretiva | Por que não |
+|---|---|
+| `PrivateNetwork` | o backend fala com o túnel em loopback e com as APIs dos LLMs |
+| `PrivateUsers` | o agente roda comandos como o próprio usuário do serviço |
+| `SystemCallFilter` | o agente executa ferramentas arbitrárias (`python`, `node`, `git`…); um filtro de syscalls quebraria casos legítimos |
+| `RestrictAddressFamilies` | idem: comandos do agente usam Unix/netlink/inet |
+| `MemoryDenyWriteExecute` | risco de quebrar bibliotecas com JIT/trampolines (`cffi`, numba) |
+| `RootDirectory` | o agente precisa enxergar o workspace e o repo reais |
+
+`RestrictNamespaces=true` **bloqueia docker/podman dentro do agente**; se
+precisar, troque para `false` no `deploy/odin.service` e registre o motivo.
+Com o sistema de arquivos só-leitura, caches de `pip`/`npm` sob `$HOME` falham —
+aponte-os para um diretório gravável (linhas `#Environment=XDG_CACHE_HOME=…`
+comentadas no final do unit).
 
 ---
 
@@ -151,6 +195,14 @@ journalctl -u odin.service -f
 - **Token:** obrigatório para hospedar. Gere com `openssl rand -hex 32`.
   Falhas repetidas de token por cliente retornam **429** (limite em
   `ODIN_AUTH_MAX_FAILURES` / `ODIN_AUTH_WINDOW_SECONDS`).
+- **Segredo de sessão (`ODIN_SESSION_SECRET`):** assina os tokens de login do
+  painel (issue #13). Deixe **vazio** para derivá-lo do `ODIN_API_TOKEN`, ou
+  gere um próprio com `openssl rand -hex 32` para rotacionar o login do painel
+  sem trocar o token da API. **NUNCA** versione um valor real: quem tem o
+  segredo forja uma sessão válida sem saber o token. O startup avisa
+  (`INSECURE CONFIGURATION`) se detectar um valor público/placeholder. Rotacionar
+  o segredo — ou o token de que ele deriva — **invalida todas as sessões**
+  existentes do painel (todos precisam logar de novo).
 - **Comandos perigosos agora exigem aprovação** (`backend/app/security/policy.py`):
   `rm`, `rmdir`, `chmod`, `chown`, `chgrp`, `truncate` (destrutivos), `ssh`,
   `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet` (remotos) e `curl`, `wget`

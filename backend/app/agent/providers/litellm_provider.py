@@ -23,10 +23,14 @@ regenerate it for a LiteLLM provider.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
+import sys
+import threading
 import uuid
+from collections.abc import Iterator
 from typing import Any, AsyncIterator
 
 from app.agent.providers.base import LLMChunk, LLMMessage, LLMTool, LLMToolCall
@@ -47,12 +51,73 @@ _API_BASE_SETTING = {
 # it must never run at module import / app startup.
 _loaded_litellm: Any | None = None
 
+# Reported at most once per process (see ``_log_filter_guard``).
+_report_lock = threading.Lock()
+_reported_broken_filter = False
+
+
+def _report_broken_filter(exc: BaseException) -> None:
+    """Print a one-time note to stderr when a logging filter misbehaves.
+
+    Plain ``print`` on purpose: going through ``logging`` here would re-enter
+    the very machinery that just failed.
+    """
+    global _reported_broken_filter
+    with _report_lock:
+        if _reported_broken_filter:
+            return
+        _reported_broken_filter = True
+    print(
+        "[odin] suppressed an exception from a logging filter "
+        f"({type(exc).__name__}: {exc}); this is the LiteLLM import race "
+        "described in AGENTS.md and does not affect the request path.",
+        file=sys.stderr,
+    )
+
+
+@contextlib.contextmanager
+def _log_filter_guard() -> Iterator[None]:
+    """Keep a broken logging filter from crashing a logging call.
+
+    LiteLLM (1.105.x) installs a *global* logging filter (on ``uvicorn.error``,
+    ``uvicorn.access``, ``httpx``, ``asyncio``, …) whose ``filter()`` lazily
+    imports ``litellm.rust_bridge.catalog`` on every record. While LiteLLM is
+    still being imported — which is exactly what the background warm-up does —
+    that import is circular and raises ``ImportError`` *inside* ``logging``.
+    ``logging`` does not catch filter exceptions, so whichever call logged dies
+    with it: uvicorn logging "Application startup complete." took the whole
+    process down on a fresh boot (intermittently, depending on the race).
+
+    Guarding ``logging.Logger.handle`` for the duration of the first import
+    drops the offending record instead of crashing. It is restored immediately
+    afterwards — once LiteLLM is imported the filter works normally — so the
+    guard never outlives the import and no other behaviour changes.
+    """
+    original = logging.Logger.handle
+    if getattr(original, "_odin_filter_guard", False):
+        yield
+        return
+
+    def handle(self: logging.Logger, record: logging.LogRecord) -> Any:
+        try:
+            return original(self, record)
+        except Exception as exc:  # noqa: BLE001 — logging must never crash us
+            _report_broken_filter(exc)
+
+    handle._odin_filter_guard = True  # type: ignore[attr-defined]
+    logging.Logger.handle = handle
+    try:
+        yield
+    finally:
+        logging.Logger.handle = original
+
 
 def _get_litellm() -> Any:
     """Return the LiteLLM module, importing it on first use."""
     global _loaded_litellm
     if _loaded_litellm is None:
-        import litellm  # noqa: PLC0415 — intentionally lazy (heavy import)
+        with _log_filter_guard():
+            import litellm  # noqa: PLC0415 — intentionally lazy (heavy import)
 
         # Never fail a request just because a model rejects an optional param,
         # and keep LiteLLM's own banner out of the app logs.
