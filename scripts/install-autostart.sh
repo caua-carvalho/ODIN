@@ -67,13 +67,20 @@ if [ -d "$CONFIG_HOME/hypr" ]; then
     touch "$HYPR_EXECS"
     # Drop any previously managed block (idempotent re-runs).
     sed -i '/^-- >>> odin-autostart >>>$/,/^-- <<< odin-autostart <<<$/d' "$HYPR_EXECS"
+    # The Hyprland hook must point at THIS clone, not at a hardcoded $HOME/odin,
+    # so the panel opens on a checkout anywhere on disk. Escape the two
+    # characters that are special inside a Lua string literal (backslash and
+    # double quote) so a path with those still renders a valid hook.
+    HYPR_OPEN_PANEL="$ROOT_DIR/scripts/open-panel.sh"
+    HYPR_OPEN_PANEL="${HYPR_OPEN_PANEL//\\/\\\\}"
+    HYPR_OPEN_PANEL="${HYPR_OPEN_PANEL//\"/\\\"}"
     cat >> "$HYPR_EXECS" <<EOF
 -- >>> odin-autostart >>>
 -- Managed by $ROOT_DIR/scripts/install-autostart.sh — do not edit by hand.
 -- Opens the Odin web panel shortly after Hyprland starts (the backend itself
 -- is started at boot by the systemd --user unit odin.service).
 hl.on("hyprland.start", function()
-    hl.exec_cmd("\$HOME/odin/scripts/open-panel.sh")
+    hl.exec_cmd("$HYPR_OPEN_PANEL")
 end)
 -- <<< odin-autostart <<<
 EOF
