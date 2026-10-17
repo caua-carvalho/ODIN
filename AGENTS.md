@@ -69,9 +69,24 @@ walkthrough in **`README.deploy.md`**. Pieces:
 
 - `deploy/odin.service` — system systemd unit template (rendered by
   `scripts/install-service.sh`); this is the *hosting* unit, distinct from the
-  desktop `--user` unit installed by `install-autostart.sh`.
+  desktop `--user` unit installed by `install-autostart.sh`. It is hardened
+  (issue #14): `ProtectSystem=strict`, `ProtectHome` (rendered to `true` or
+  `read-only` depending on whether the repo/workspace is under `$HOME`), no
+  capabilities, `UMask=0077`, and `ReadWritePaths` limited to the repo +
+  workspace (+ any absolute `DATABASE_URL`/`ODIN_MEMORY_PATH` dir). Omitted by
+  design: `PrivateNetwork`, `PrivateUsers`, `SystemCallFilter`,
+  `RestrictAddressFamilies`, `MemoryDenyWriteExecute`, `RootDirectory` — the
+  agent executes arbitrary commands, so those would break legitimate work.
+  Rationale table lives in `README.deploy.md`; `install-service.sh --print`
+  renders the unit without sudo and the invariants are guarded by
+  `backend/tests/test_deploy_security.py`.
 - `.env.production.example` — production env template (loopback bind, token,
-  public `ODIN_CORS_ORIGINS`).
+  public `ODIN_CORS_ORIGINS`). It ships **no secret values**: `ODIN_SESSION_SECRET`
+  is empty on purpose (derive from the token, or `openssl rand -hex 32`). A
+  published/placeholder secret lets anyone forge a panel session, so
+  `main.py` logs `INSECURE CONFIGURATION` at startup when
+  `insecure_session_secret_reason()` flags it (issue #13); example files are
+  checked by `tests/test_auth_session.py`.
 - `scripts/cloudflared-quick-tunnel.sh` — immediate `*.trycloudflare.com` URL
   (rotating, no Access); named tunnel + domain + Cloudflare Access is documented
   in the README.
@@ -110,6 +125,21 @@ that is already prefixed is left untouched.
 > startup so the first user message does not pay that cost. The legacy adapters
 > (`gemini.py`, `groq.py`, `ollama.py`) were **removed** once LiteLLM was
 > validated end-to-end; `litellm_provider.py` is now the only adapter.
+
+> **LiteLLM installs a global logging filter that races its own import** (1.105.x):
+> `litellm/_logging.py` attaches `SecretRedactionFilter` to `uvicorn.error`,
+> `uvicorn.access`, `httpx`, `asyncio`, … and its `filter()` lazily imports
+> `litellm.rust_bridge.catalog` **on every record**. While LiteLLM is still being
+> imported (the `warm()` thread), that import is circular and raises `ImportError`
+> *inside* `logging` — and `logging` does not catch filter errors, so the log call
+> dies with it. On a fresh boot uvicorn's `"Application startup complete."` therefore
+> killed the process, intermittently (≈2 of 3 boots; `Restart=always` simply flapped).
+> `litellm_provider._log_filter_guard()` wraps the first import and turns a raising
+> logging filter into a dropped record + a one-time stderr note, then restores
+> `logging.Logger.handle`. Do **not** work around it with
+> `LITELLM_DISABLE_REDACT_SECRETS` — that filter is what scrubs the `?token=` query
+> parameter from `uvicorn.access` logs. Guarded by
+> `tests/test_litellm_provider.py::TestLogFilterGuard`.
 
 > **Tool-call ids are preserved verbatim** by `LiteLLMProvider`. LiteLLM encodes
 > the Gemini thought signature inside the tool-call id (separator `__thought__`)
