@@ -423,6 +423,7 @@ class LiteLLMProvider:
         max_retries: int = 3,
         retry_base_delay: float = 1.0,
         retry_max_delay: float = 30.0,
+        ollama_think: bool = False,
     ) -> None:
         self.provider = (provider or "").strip().lower()
         self.model = model
@@ -435,6 +436,9 @@ class LiteLLMProvider:
         self.max_retries = max(0, int(max_retries))
         self.retry_base_delay = max(0.0, float(retry_base_delay))
         self.retry_max_delay = max(0.0, float(retry_max_delay))
+        # Ollama ``think`` flag (``OLLAMA_THINK``). Forwarded verbatim to
+        # Ollama's request body; ignored for every other provider.
+        self.ollama_think = bool(ollama_think)
         logger.info(f"LiteLLMProvider initialized: {self.litellm_model}")
 
     @classmethod
@@ -474,6 +478,7 @@ class LiteLLMProvider:
             max_retries=getattr(config, "odin_llm_max_retries", 3),
             retry_base_delay=getattr(config, "odin_llm_retry_base_delay", 1.0),
             retry_max_delay=getattr(config, "odin_llm_retry_max_delay", 30.0),
+            ollama_think=getattr(config, "ollama_think", False),
         )
 
     async def generate(
@@ -504,6 +509,15 @@ class LiteLLMProvider:
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if self.provider == "ollama":
+            # Ollama's ``think`` flag. LiteLLM reads this as a top-level
+            # provider-specific param (``OllamaConfig.map_openai_params`` is not
+            # involved) and copies it into the request body's ``think`` field;
+            # ``extra_body`` would stay nested and never reach Ollama. Sent
+            # explicitly for both True and False: reasoning models (qwen3)
+            # return empty content/tool calls while thinking, so ``False`` is a
+            # meaningful value, not merely a default.
+            kwargs["think"] = self.ollama_think
 
         attempt = 0
         while True:

@@ -315,7 +315,7 @@ class TestGenerate:
         )
 
         provider = LiteLLMProvider(
-            model="gemini-2.0-flash", provider="gemini", api_key="k"
+            model="gemini-2.5-flash", provider="gemini", api_key="k"
         )
         out = []
         async for chunk in provider.generate(
@@ -334,7 +334,7 @@ class TestGenerate:
 
         # The request was translated into LiteLLM's shape.
         cap = fake.captured
-        assert cap["model"] == "gemini/gemini-2.0-flash"
+        assert cap["model"] == "gemini/gemini-2.5-flash"
         assert cap["stream"] is True
         assert cap["api_key"] == "k"
         assert cap["messages"][0] == {"role": "system", "content": "You are Odin."}
@@ -359,6 +359,77 @@ class TestGenerate:
         ):
             pass
         assert "tools" not in fake.captured
+
+
+# ---------------------------------------------------------------------------
+# Ollama provider-specific ``think`` parameter (OLLAMA_THINK)
+# ---------------------------------------------------------------------------
+class TestOllamaThink:
+    """``OLLAMA_THINK`` must actually reach the Ollama request.
+
+    LiteLLM forwards a top-level ``think`` kwarg verbatim into Ollama's request
+    body (the provider-specific param pass-through); it is *not* one of the
+    OpenAI params LiteLLM validates, so calling it out explicitly is the only
+    way ``extra_body``/unknown-param filtering cannot silently drop it.
+    """
+
+    async def _capture(self, use_fake_litellm, **provider_kwargs):
+        fake = use_fake_litellm([_FakeChunk(delta=_FakeDelta(content="ok"))])
+        provider = LiteLLMProvider(**provider_kwargs)
+        async for _ in provider.generate(
+            messages=[LLMMessage(role="user", content="hi")], tools=[], system=""
+        ):
+            pass
+        return fake.captured
+
+    async def test_true_reaches_ollama_request(self, use_fake_litellm):
+        captured = await self._capture(
+            use_fake_litellm,
+            model="qwen3:0.6b",
+            provider="ollama",
+            ollama_think=True,
+        )
+        assert captured["think"] is True
+
+    async def test_false_is_still_forwarded(self, use_fake_litellm):
+        """False is a meaningful value, not just the default: qwen3 returns
+        empty responses with thinking on, so the off-state must be sent."""
+        captured = await self._capture(
+            use_fake_litellm,
+            model="qwen3:0.6b",
+            provider="ollama",
+            ollama_think=False,
+        )
+        assert captured["think"] is False
+
+    async def test_absent_for_non_ollama_providers(self, use_fake_litellm):
+        captured = await self._capture(
+            use_fake_litellm,
+            model="gemini-2.5-flash",
+            provider="gemini",
+            api_key="k",
+            ollama_think=True,
+        )
+        assert "think" not in captured
+
+    def test_from_settings_threads_the_flag(self):
+        s = Settings(
+            odin_model_provider="ollama",
+            odin_model="qwen3:0.6b",
+            ollama_think=True,
+            _env_file=None,
+        )
+        provider = LiteLLMProvider.from_settings(s)
+        assert provider.ollama_think is True
+        assert provider.provider == "ollama"
+
+    def test_from_settings_default_is_false(self):
+        s = Settings(
+            odin_model_provider="ollama",
+            odin_model="qwen3:0.6b",
+            _env_file=None,
+        )
+        assert LiteLLMProvider.from_settings(s).ollama_think is False
 
 
 # ---------------------------------------------------------------------------

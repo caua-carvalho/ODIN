@@ -120,6 +120,25 @@ that is already prefixed is left untouched.
 > adapter class is needed. The catalog's `litellm_prefix` (defaults to the id)
 > and `api_key_setting` drive both the factory and `/api/providers`.
 
+> **Ollama `think`** (`OLLAMA_THINK`, default `false`): threaded through
+> `Settings.ollama_think` → `LiteLLMProvider(ollama_think=...)` and, **only for
+> the `ollama` provider**, sent as a top-level `think=<bool>` kwarg to
+> `litellm.acompletion`. LiteLLM copies a top-level provider-specific kwarg
+> straight into Ollama's request body (`extra_body` stays nested and never
+> reaches Ollama; the OpenAI-param validator is bypassed for it). Sent
+> explicitly for both values: reasoning models (qwen3) return empty
+> content/tool calls while thinking, so `false` is a meaningful instruction, not
+> a default. Covered offline by `tests/test_provider_contract.py` and
+> `tests/test_litellm_provider.py::TestOllamaThink`.
+
+> **Provider contract suite** (`backend/tests/test_provider_contract.py`): runs
+> **offline by default** over every catalog provider (reusing the fake LiteLLM
+> backend) and exposes a real, opt-in path guarded by `ODIN_CONTRACT_TESTS`
+> (`1`/`all` or a comma list) **plus** the provider's key/base in the
+> environment. The gate reads a snapshot captured in `tests/conftest.py` before
+> any test module sets placeholder keys. See the module docstring for the
+> per-provider commands; `backend/smoke_*.py` stay as quick manual shortcuts.
+
 > **LiteLLM is imported lazily** (the adapter imports it on first use) because
 > `import litellm` costs ~15s. `main.py` starts a daemon thread (`warm()`) at
 > startup so the first user message does not pay that cost. The legacy adapters
