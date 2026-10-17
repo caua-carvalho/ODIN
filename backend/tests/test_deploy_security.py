@@ -64,6 +64,49 @@ class TestClientKey:
         scope = {"headers": [], "client": ("10.0.0.9", 1234)}
         assert _client_key(scope) == "10.0.0.9"
 
+    def test_trusts_forwarded_headers_from_ipv6_loopback(self):
+        scope = {
+            "headers": [(b"x-forwarded-for", b"203.0.113.7")],
+            "client": ("::1", 1234),
+        }
+        assert _client_key(scope) == "203.0.113.7"
+
+    def test_trusts_forwarded_headers_from_mapped_loopback(self):
+        scope = {
+            "headers": [(b"cf-connecting-ip", b"203.0.113.7")],
+            "client": ("::ffff:127.0.0.1", 1234),
+        }
+        assert _client_key(scope) == "203.0.113.7"
+
+    def test_ignores_forwarded_headers_from_non_loopback_peer(self):
+        """Regression (issue #15): a spoofed header must not change the bucket."""
+        scope = {
+            "headers": [
+                (b"cf-connecting-ip", b"1.2.3.4"),
+                (b"x-forwarded-for", b"5.6.7.8"),
+            ],
+            "client": ("203.0.113.9", 41234),
+        }
+        assert _client_key(scope) == "203.0.113.9"
+
+    def test_ignores_forwarded_headers_from_unparseable_peer(self):
+        # The TestClient peer is the literal string "testclient", not an IP.
+        scope = {
+            "headers": [(b"x-forwarded-for", b"1.2.3.4")],
+            "client": ("testclient", 50000),
+        }
+        assert _client_key(scope) == "testclient"
+
+    def test_ignores_headers_when_loopback_peer_sends_only_whitespace(self):
+        scope = {
+            "headers": [(b"x-forwarded-for", b"   ")],
+            "client": ("127.0.0.1", 1234),
+        }
+        assert _client_key(scope) == "127.0.0.1"
+
+    def test_unknown_peer_without_socket_address(self):
+        assert _client_key({"headers": [], "client": None}) == "unknown"
+
 
 class TestFailureLimiter:
     def test_allows_until_threshold(self):

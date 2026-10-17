@@ -9,10 +9,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 # Make sure we can import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -163,6 +164,129 @@ class TestLoginEndpoint:
             "/api/secret", headers={"Authorization": f"Bearer {expired}"}
         )
         assert response.status_code == 401
+
+    def test_forged_session_rejected_by_middleware(self, signer_client):
+        # Correct structure/`alg` but signed with a different secret.
+        forged, _ = SessionSigner("not-the-secret").create(3600)
+        response = signer_client.get(
+            "/api/secret", headers={"Authorization": f"Bearer {forged}"}
+        )
+        assert response.status_code == 401
+
+    def test_expired_session_in_query_rejected(self, signer_client):
+        expired, _ = SessionSigner(RAW_TOKEN).create(60, now=1_700_000_000)
+        assert signer_client.get(f"/api/secret?token={expired}").status_code == 401
+
+
+def _guarded_app(limiter: _FailureLimiter | None = None) -> FastAPI:
+    """A minimal app guarded by the real middleware, plus a WS echo route."""
+    app = FastAPI()
+
+    @app.get("/api/secret")
+    async def secret():
+        return {"ok": True}
+
+    @app.websocket("/api/ws/{conversation_id}")
+    async def websocket_echo(websocket: WebSocket):
+        await websocket.accept()
+        await websocket.send_json({"type": "ready"})
+        await websocket.close()
+
+    app.add_middleware(
+        TokenAuthMiddleware,
+        token=RAW_TOKEN,
+        limiter=limiter if limiter is not None else _FailureLimiter(10, 60),
+        session_signer=SessionSigner(RAW_TOKEN),
+    )
+    return app
+
+
+class TestRateLimitSpoofing:
+    """Issue #15: proxy headers must not let a non-proxy client evade the limit."""
+
+    def test_spoofed_headers_cannot_evade_limit_from_non_loopback(self):
+        limiter = _FailureLimiter(max_failures=3, window_seconds=60)
+        app = _guarded_app(limiter)
+        with TestClient(app, client=("203.0.113.9", 41234)) as client:
+            for i in range(3):
+                response = client.get(
+                    "/api/secret",
+                    headers={
+                        "CF-Connecting-IP": f"10.0.1.{i}",
+                        "X-Forwarded-For": f"10.0.0.{i}",
+                    },
+                )
+                assert response.status_code == 401
+            # A brand-new spoofed identity still hits the same bucket -> 429.
+            blocked = client.get(
+                "/api/secret",
+                headers={
+                    "CF-Connecting-IP": "10.0.1.250",
+                    "X-Forwarded-For": "10.0.0.250",
+                },
+            )
+            assert blocked.status_code == 429
+
+    def test_real_proxy_headers_still_bucket_clients_separately(self):
+        """Behind the local tunnel the peer *is* loopback, so headers are used."""
+        limiter = _FailureLimiter(max_failures=2, window_seconds=60)
+        app = _guarded_app(limiter)
+        with TestClient(app, client=("127.0.0.1", 41234)) as client:
+            # One forwarded client accumulates its own failures...
+            for _ in range(2):
+                assert client.get(
+                    "/api/secret", headers={"X-Forwarded-For": "198.51.100.1"}
+                ).status_code == 401
+            # ...and is blocked on the next attempt.
+            assert client.get(
+                "/api/secret", headers={"X-Forwarded-For": "198.51.100.1"}
+            ).status_code == 429
+            # A different forwarded client keeps its own bucket.
+            assert client.get(
+                "/api/secret", headers={"X-Forwarded-For": "198.51.100.7"}
+            ).status_code == 401
+
+
+class TestWebSocketSessionAuth:
+    """Signature + expiry are validated on the WS ``?token=`` path (close 1008)."""
+
+    def _connect(self, client: TestClient, token: str):
+        return client.websocket_connect(f"/api/ws/conv?token={token}")
+
+    def test_valid_session_connects(self):
+        token, _ = SessionSigner(RAW_TOKEN).create(3600)
+        with TestClient(_guarded_app()) as client:
+            with self._connect(client, token) as ws:
+                assert ws.receive_json() == {"type": "ready"}
+
+    def test_raw_token_connects(self):
+        with TestClient(_guarded_app()) as client:
+            with self._connect(client, RAW_TOKEN) as ws:
+                assert ws.receive_json() == {"type": "ready"}
+
+    def test_forged_session_is_closed_1008(self):
+        forged, _ = SessionSigner("not-the-secret").create(3600)
+        with TestClient(_guarded_app()) as client:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                with self._connect(client, forged):
+                    pass
+            assert exc.value.code == 1008
+
+    def test_expired_session_is_closed_1008(self):
+        expired, _ = SessionSigner(RAW_TOKEN).create(60, now=1_700_000_000)
+        with TestClient(_guarded_app()) as client:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                with self._connect(client, expired):
+                    pass
+            assert exc.value.code == 1008
+
+    def test_missing_credential_is_closed_1008(self):
+        with TestClient(_guarded_app()) as client:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                with client.websocket_connect("/api/ws/conv"):
+                    pass
+            assert exc.value.code == 1008
+
 
 
 class TestInsecureSecretDetection:

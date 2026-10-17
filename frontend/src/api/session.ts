@@ -6,12 +6,18 @@
  * token lives (`localStorage`) and exposes the single credential getter used by
  * the REST client and the WebSocket hook.
  *
- * A pre-existing `localStorage['odin_api_token']` is still honoured as a
- * fallback so setups that were configured by hand keep working; it is simply
- * outranked by a valid session.
+ * Legacy raw-token migration (issue #15): older installs stored the long-lived
+ * `ODIN_API_TOKEN` directly in `localStorage['odin_api_token']`. That key is
+ * still read here for a one-time, backward-compatible transition, but it is
+ * **deprecated**: `AuthProvider` exchanges it for a session on boot and then
+ * deletes it (`getLegacyToken`/`clearLegacyToken`), and a rejected credential
+ * drops it too. New code must never write it; the long-lived secret should not
+ * persist in the browser.
  */
 
 const SESSION_KEY = 'odin_session';
+
+/** @deprecated Legacy raw-token key, kept only for the one-time migration. */
 export const LEGACY_TOKEN_KEY = 'odin_api_token';
 
 /** Fired when the backend rejects the current credential (HTTP 401 / WS 1008). */
@@ -61,17 +67,35 @@ export function clearSession(): void {
 }
 
 /**
+ * A hand-set legacy raw API token, if any (used only for the one-time
+ * migration to a session; see `AuthProvider`).
+ */
+export function getLegacyToken(): string | null {
+  try {
+    return window.localStorage.getItem(LEGACY_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Drop the deprecated raw-token entry for good. */
+export function clearLegacyToken(): void {
+  try {
+    window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
  * Credential to send on API/WebSocket requests: the session token when present,
- * otherwise the legacy raw API token.
+ * otherwise the legacy raw API token (until `AuthProvider` migrates or drops
+ * it). Never returns both.
  */
 export function getAuthCredential(): string {
   const session = getStoredSession();
   if (session) return session.token;
-  try {
-    return window.localStorage.getItem(LEGACY_TOKEN_KEY) || '';
-  } catch {
-    return '';
-  }
+  return getLegacyToken() || '';
 }
 
 /** Tell the app the credential was rejected so it can return to the login screen. */

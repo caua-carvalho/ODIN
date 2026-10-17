@@ -17,9 +17,21 @@ Registration order matters: in ``main.py`` this middleware is added *before*
 ``CORSMiddleware``. Starlette makes the **last**-added middleware the outermost
 one, so adding CORS afterwards keeps it outside the auth gate and lets it answer
 preflight ``OPTIONS`` requests (which never carry an ``Authorization`` header).
+
+CSRF (issue #15): CSRF does **not** apply to the current design, because the
+credential is never carried automatically by the browser — it travels in an
+``Authorization: Bearer`` header (or the ``?token=`` WebSocket query parameter),
+which a cross-site form/img/script cannot set. There are no cookies and no
+cookie-based session, so an attacker page has no ambient authority to abuse.
+CSRF would only become applicable if authentication moved to cookies
+(``SameSite=None`` ``HttpOnly`` session cookies): at that point this project
+would need anti-CSRF tokens (``SameSite`` + double-submit or a synchronizer
+token) on every state-changing ``/api/*`` route. This note is the recorded
+decision; revisit it if cookie auth is ever introduced.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import secrets
 import time
@@ -41,22 +53,55 @@ _HTTP_TOO_MANY_REQUESTS = 429
 PUBLIC_PATHS = frozenset({"/api/health", "/api/auth/login"})
 
 
+def _is_loopback_peer(host: object) -> bool:
+    """True when ``host`` names a loopback address.
+
+    The backend is intended to sit behind a *local* Cloudflare tunnel (or an
+    equivalent reverse proxy) listening on ``127.0.0.1``, so a request whose
+    immediate socket peer is loopback really did come from that proxy. Handles
+    ``localhost``, IPv4/IPv6 literals, bracketed IPv6 and the
+    ``::ffff:127.0.0.1`` mapped form; anything unparseable (e.g. the
+    ``testclient`` peer) is not loopback.
+    """
+    if not isinstance(host, str):
+        return False
+    value = host.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    # Drop an IPv6 zone id (e.g. ``fe80::1%eth0``).
+    value = value.split("%", 1)[0]
+    if not value:
+        return False
+    if value.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
 def _client_key(scope: Scope) -> str:
     """Best-effort client identity for throttling.
 
-    Prefers ``CF-Connecting-IP`` / ``X-Forwarded-For`` so that, behind the
-    Cloudflare tunnel (where every request arrives from 127.0.0.1), distinct
-    clients are still bucketed separately. Falls back to the socket peer.
+    ``CF-Connecting-IP`` / ``X-Forwarded-For`` are honoured **only** when the
+    immediate socket peer is loopback (issue #15): the intended topology puts a
+    local tunnel/proxy on ``127.0.0.1`` in front of the backend, so a loopback
+    peer is genuinely the proxy and those headers carry the real client. From any
+    other peer the headers are attacker-controlled — trusting them would let a
+    client rotate its rate-limit bucket on every attempt — so the socket address
+    is used instead.
     """
-    headers = {k.lower(): v for k, v in (scope.get("headers") or [])}
-    for header in (b"cf-connecting-ip", b"x-forwarded-for"):
-        raw = headers.get(header)
-        if raw:
-            return raw.decode("latin-1").split(",")[0].strip()
     client = scope.get("client")
-    if client:
-        return client[0]
-    return "unknown"
+    peer = client[0] if client else None
+    if _is_loopback_peer(peer):
+        headers = {k.lower(): v for k, v in (scope.get("headers") or [])}
+        for header in (b"cf-connecting-ip", b"x-forwarded-for"):
+            raw = headers.get(header)
+            if raw:
+                candidate = raw.decode("latin-1").split(",")[0].strip()
+                if candidate:
+                    return candidate
+    return peer or "unknown"
 
 
 class _FailureLimiter:

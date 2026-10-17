@@ -23,6 +23,13 @@ A value that is public (it shipped in a versioned example file) or an obvious
 placeholder must never sign sessions, because anyone could forge a valid panel
 session with it. :func:`insecure_session_secret_reason` flags those values so
 startup can warn loudly (issue #13).
+
+Every entry point that accepts a session credential funnels through
+:meth:`SessionSigner.verify`, which validates the HMAC signature **and** the
+``exp`` expiry before accepting it. ``TokenAuthMiddleware`` (HTTP
+``Authorization`` header *and* the WebSocket ``?token=`` query parameter, which
+closes with ``1008`` on failure) and ``GET /api/auth/session`` both call it, so
+an expired or forged session is rejected identically on every transport.
 """
 from __future__ import annotations
 

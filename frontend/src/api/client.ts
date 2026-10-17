@@ -1,4 +1,5 @@
 import {
+  clearLegacyToken,
   clearSession,
   getAuthCredential,
   getStoredSession,
@@ -12,7 +13,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
  *
  * Prefers the expiring session token obtained from `POST /api/auth/login`
  * (stored by `api/session.ts`); falls back to a hand-set
- * `localStorage['odin_api_token']` for CLI-style/legacy setups.
+ * `localStorage['odin_api_token']` only until it is migrated away on boot.
  */
 export function getApiToken(): string {
   return getAuthCredential();
@@ -20,10 +21,13 @@ export function getApiToken(): string {
 
 /**
  * Handle a rejected credential: drop the stale session and let the app return
- * to the login screen. The legacy raw token is left untouched.
+ * to the login screen. The deprecated raw token is dropped too — the presented
+ * credential was rejected, so keeping a long-lived secret that no longer works
+ * only leaves it in the browser.
  */
 function handleUnauthorized(): void {
   if (getStoredSession()) clearSession();
+  clearLegacyToken();
   notifyUnauthorized();
 }
 
