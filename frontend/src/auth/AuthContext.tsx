@@ -11,8 +11,11 @@ import { ApiError } from '../api/client';
 import { authApi } from '../api/auth';
 import { healthApi } from '../api/health';
 import {
+  clearLegacyToken,
   clearSession,
   getAuthCredential,
+  getLegacyToken,
+  getStoredSession,
   saveSession,
   UNAUTHORIZED_EVENT,
 } from '../api/session';
@@ -33,6 +36,33 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+/**
+ * One-time transition for installs that stored the raw `ODIN_API_TOKEN` in
+ * `localStorage['odin_api_token']` (issue #15): exchange it for a signed,
+ * expiring session and delete the long-lived secret. Best-effort — a network
+ * failure keeps the raw token so the migration can retry on the next boot,
+ * while an invalid credential (401) or a server with auth disabled (503) drops
+ * it instead of leaving a dead secret behind.
+ */
+async function migrateLegacyToken(): Promise<void> {
+  if (getStoredSession()) {
+    // A session already outranks the legacy token — drop the raw secret.
+    clearLegacyToken();
+    return;
+  }
+  const legacy = getLegacyToken();
+  if (!legacy) return;
+  try {
+    const result = await authApi.login(legacy, true);
+    saveSession(result.token, result.expires_at);
+    clearLegacyToken();
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 401 || err.status === 503)) {
+      clearLegacyToken();
+    }
+  }
+}
 
 /**
  * Owns the login state of the web panel.
@@ -63,6 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus('disabled');
       return;
     }
+
+    // Exchange a legacy raw token for a session before the first request.
+    await migrateLegacyToken();
 
     if (!getAuthCredential()) {
       setStatus('unauthenticated');
