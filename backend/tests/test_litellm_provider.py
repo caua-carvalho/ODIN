@@ -8,7 +8,9 @@ provider-extra round-tripping and error handling.
 LiteLLM is never actually imported: a fake module stands in for it, so the
 suite stays fast and network-free.
 """
+import contextlib
 import inspect
+import logging
 import os
 import sys
 from pathlib import Path
@@ -510,3 +512,84 @@ class TestRetryBehaviour:
         out = await _collect(_retry_provider())
 
         assert [c.type for c in out] == ["text", "error"]
+
+
+# ---------------------------------------------------------------------------
+# Log-filter guard (LiteLLM 1.105 import race)
+# ---------------------------------------------------------------------------
+class _RaisingFilter(logging.Filter):
+    def filter(self, record):
+        raise ImportError("simulated partial litellm.rust_bridge.catalog")
+
+
+class TestLogFilterGuard:
+    """A raising logging filter must never crash the logging call.
+
+    Regression for the LiteLLM 1.105 boot race: importing litellm attaches a
+    global filter to ``uvicorn.error``/``uvicorn.access``/``httpx``/``asyncio``
+    whose ``filter()`` imports ``litellm.rust_bridge.catalog``. While litellm is
+    still importing in the warm-up thread that import is circular and raises
+    ``ImportError`` inside ``logging`` — which killed uvicorn's
+    "Application startup complete." log and, with it, the whole process.
+    """
+
+    def _logger_with_bad_filter(self):
+        logger = logging.getLogger("odin.test.broken-filter")
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        logger.handlers = [logging.NullHandler()]
+        bad = _RaisingFilter()
+        logger.addFilter(bad)
+        return logger, bad
+
+    def test_without_the_guard_the_exception_propagates(self):
+        logger, bad = self._logger_with_bad_filter()
+        try:
+            with pytest.raises(ImportError):
+                logger.info("this would take the process down")
+        finally:
+            logger.removeFilter(bad)
+
+    def test_guard_swallows_filter_exceptions(self):
+        logger, bad = self._logger_with_bad_filter()
+        try:
+            with mod._log_filter_guard():
+                logger.info("must not raise")  # no exception escapes
+        finally:
+            logger.removeFilter(bad)
+
+    def test_guard_is_restored_after_use(self):
+        original = logging.Logger.handle
+        with mod._log_filter_guard():
+            assert logging.Logger.handle is not original
+        assert logging.Logger.handle is original
+
+    def test_guard_is_reentrant(self):
+        original = logging.Logger.handle
+        with mod._log_filter_guard():
+            inner = logging.Logger.handle
+            with mod._log_filter_guard():
+                assert logging.Logger.handle is inner
+        assert logging.Logger.handle is original
+
+    def test_get_litellm_imports_under_the_guard(self, monkeypatch):
+        fake = SimpleNamespace()
+        monkeypatch.setitem(sys.modules, "litellm", fake)
+        monkeypatch.setattr(mod, "_loaded_litellm", None)
+
+        entered = []
+        real_guard = mod._log_filter_guard
+
+        @contextlib.contextmanager
+        def spy():
+            entered.append(True)
+            with real_guard():
+                yield
+
+        monkeypatch.setattr(mod, "_log_filter_guard", spy)
+
+        assert mod._get_litellm() is fake
+        assert entered == [True]
+        assert fake.drop_params is True
+        assert fake.suppress_debug_info is True
+
