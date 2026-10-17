@@ -247,8 +247,11 @@ the agent loop behaves exactly as before. The `mem0` import is lazy, inside
   never fabricated (`ODIN_MEMORY_STORE_METADATA=false` disables the metadata).
 - Wiring: `agent.py` recalls before a turn and writes the exchange back after
   `done`; the explicit `memory` tool (`backend/app/tools/memory/`) lets the agent
-  save/recall/list/update/forget on request. The tool touches only Odin's own
-  store (no filesystem/shell), so it needs **no** approval.
+  save/recall/list/update/forget on request. `create_memory_tools` registers it
+  **only when memory is enabled** (a `None` service registers nothing), so a
+  default install keeps the exact tool surface it had before the feature. The
+  tool touches only Odin's own store (no filesystem/shell), so it needs **no**
+  approval.
 - Config: `ODIN_MEMORY_RECALL_LIMIT` (per-turn recall), `ODIN_MEMORY_LIST_LIMIT`
   (cap for the tool's `list`). The SQLite `odin.db` schema is **not** used —
   Mem0 owns an embedded vector store on disk (`ODIN_MEMORY_VECTOR_STORE`).

@@ -118,7 +118,8 @@ async def lifespan(app: FastAPI):
         tool_registry.register(project_tool)
 
     # Long-term memory (Phase 3, optional). ``None`` when disabled or when Mem0
-    # is not installed. The single service instance is shared by the explicit
+    # is not installed — then no `memory` tool is registered and the tool surface
+    # is exactly as before. The single service instance is shared by the explicit
     # `memory` tool and the agent loop's automatic recall/write-back.
     memory_service = create_memory_service(settings)
     for memory_tool in create_memory_tools(memory_service):

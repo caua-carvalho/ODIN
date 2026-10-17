@@ -11,8 +11,9 @@ The tool only touches Odin's **own** long-term memory store (Mem0's embedded
 vector store) — it resolves no filesystem path and runs no shell command. There
 is no workspace boundary to enforce, so it is registered with
 ``requires_approval_by_default=False`` and never creates a permission request.
-When the store is unavailable (memory is opt-in and off by default) it returns
-a clear error instead of raising, so it can never take down a turn.
+Memory is opt-in and off by default: when the store is unavailable the factory
+registers no tool, and a defensively constructed tool still returns a clear
+error instead of raising, so it can never take down a turn.
 """
 
 from __future__ import annotations
@@ -33,8 +34,10 @@ class MemoryTool:
     """Single agent tool exposing the long-term memory CRUD surface."""
 
     def __init__(self, memory: MemoryService | None) -> None:
-        # ``None`` when memory is disabled or Mem0 is not installed: the tool
-        # stays registered (a stable tool surface) but reports unavailability.
+        # ``None`` when memory is disabled or Mem0 is not installed. The factory
+        # (``create_memory_tools``) then registers no tool at all, so a default
+        # install keeps the exact tool surface it had before this feature; the
+        # ``None`` branch below stays as a defensive guard.
         self.memory = memory
 
     @property
@@ -205,10 +208,15 @@ class MemoryTool:
 def create_memory_tools(memory: MemoryService | None) -> list[MemoryTool]:
     """Factory for the long-term memory tool.
 
-    Registered in the ``main.py`` lifespan next to the other tools. A ``None``
-    service (memory disabled) still yields the tool so the tool surface — and
-    ``/api/tools`` — is stable; it reports unavailability when invoked.
+    Returns an **empty list** when ``memory`` is ``None`` (memory disabled or
+    Mem0 not installed). A default install therefore exposes no dead tool: the
+    agent schema and ``/api/tools`` are exactly as they were before this
+    feature, honouring the "off by default behaves exactly as before"
+    principle. When enabled, the single ``memory`` tool is registered in the
+    ``main.py`` lifespan next to the others.
     """
+    if memory is None:
+        return []
     return [MemoryTool(memory)]
 
 

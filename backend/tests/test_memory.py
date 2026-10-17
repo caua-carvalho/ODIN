@@ -897,11 +897,10 @@ class TestMemoryToolContract:
         assert len(tools) == 1
         assert isinstance(tools[0], MemoryTool)
 
-    def test_create_memory_tools_without_service_is_stable(self):
-        # The tool surface stays present (and /api/tools stable) when memory is
-        # disabled; the tool then reports unavailability instead of vanishing.
-        tools = create_memory_tools(None)
-        assert [t.definition.name for t in tools] == ["memory"]
+    def test_create_memory_tools_without_service_registers_nothing(self):
+        # Memory off by default: the factory yields no tool, so a default
+        # install keeps the exact tool surface it had before this feature.
+        assert create_memory_tools(None) == []
 
     def test_registers_in_the_tool_registry(self):
         registry = ToolRegistry()
