@@ -21,11 +21,51 @@ EnvironmentFile=__ODIN_ROOT__/.env
 ExecStart=__ODIN_ROOT__/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
-# Give the agent room to write in its workspace but keep it out of the rest of
-# the filesystem where possible.
+
+# --- Sandboxing (issue #14) -------------------------------------------------
+# The agent executes shell commands on behalf of the model, so the service gets
+# the smallest view of the host that still works. Every option below is a
+# standard systemd hardening knob — relax one only with a documented reason
+# (README.deploy.md has the trade-offs).
 NoNewPrivileges=true
+# Whole filesystem read-only; only ReadWritePaths at the bottom stays writable.
+ProtectSystem=strict
+# ProtectHome is rendered by scripts/install-service.sh: "true" hides /home,
+# /root and /run/user completely (use it when the app lives in /opt or /srv);
+# "read-only" keeps them readable, because ReadWritePaths cannot carve an
+# exception out of a *hidden* /home when the checkout lives under $HOME.
+ProtectHome=__PROTECT_HOME__
 PrivateTmp=true
-ReadWritePaths=__ODIN_ROOT__ __ODIN_WORKSPACE__
+# Minimal /dev: no raw block devices, GPUs or serial ports reachable.
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+# Blocks creating namespaces, which also blocks docker/podman inside the agent.
+# Set to "false" (and note why) if the agent must run containers.
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+ProtectKernelLogs=true
+RemoveIPC=true
+# The service is unprivileged and needs no capabilities at all.
+CapabilityBoundingSet=
+# Restrictive permissions on everything it creates (DB, uploaded files).
+UMask=0077
+# Writable: the repo (SQLite DB at backend/odin.db) and the agent workspace.
+# The installer appends a directory here when DATABASE_URL / ODIN_MEMORY_PATH
+# point outside those two trees (ProtectSystem=strict would otherwise block
+# them). It can be narrowed to __ODIN_ROOT__/backend if nothing else needs it.
+ReadWritePaths=__ODIN_ROOT__ __ODIN_WORKSPACE__ __EXTRA_READ_WRITE_PATHS__
+#
+# With the whole filesystem read-only, tools the agent runs (pip, npm, …) may
+# fail to write their caches under $HOME. Point them at a writable dir if so:
+#Environment=XDG_CACHE_HOME=__ODIN_ROOT__/.cache
+#Environment=npm_config_cache=__ODIN_ROOT__/.cache/npm
 
 [Install]
 WantedBy=multi-user.target
