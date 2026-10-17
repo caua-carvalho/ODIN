@@ -57,6 +57,19 @@ class TestAvailability:
         assert catalog.is_configured(meta, Settings(_env_file=None)) is True
 
 
+class TestFallbackModels:
+    def test_gemini_offers_no_deprecated_ids(self):
+        """A retired model must never surface in the panel's model selector.
+
+        ``gemini-2.0-flash`` returns 404, so it must not be advertised as a
+        fallback when dynamic discovery is unavailable (#28).
+        """
+        fallback = catalog.PROVIDERS["gemini"].fallback_models
+        assert "gemini-2.5-flash" in fallback
+        assert "gemini-2.0-flash" not in fallback
+        assert not any("2.0" in model for model in fallback)
+
+
 class TestActiveSelection:
     def test_roundtrip_and_normalization(self):
         active = catalog.set_active("  GEMINI ", "gemini-2.5-flash")

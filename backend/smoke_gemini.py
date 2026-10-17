@@ -21,7 +21,7 @@ async def main() -> None:
             env_vars[k.strip()] = v.strip()
     settings = Settings(
         odin_model_provider="gemini",
-        odin_model=os.environ.get("SMOKE_GEMINI_MODEL", "gemini-2.0-flash"),
+        odin_model=os.environ.get("SMOKE_GEMINI_MODEL", "gemini-2.5-flash"),
         gemini_api_key=env_vars.get("GEMINI_API_KEY", ""),
         _env_file=None,
     )

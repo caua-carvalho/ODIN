@@ -112,11 +112,11 @@ class TestConfiguration:
 
     def test_gemini_config_from_env(self, monkeypatch):
         monkeypatch.setenv("ODIN_MODEL_PROVIDER", "gemini")
-        monkeypatch.setenv("ODIN_MODEL", "gemini-2.0-flash")
+        monkeypatch.setenv("ODIN_MODEL", "gemini-2.5-flash")
         monkeypatch.setenv("GEMINI_API_KEY", "abc123")
         s = Settings(_env_file=None)
         assert s.odin_model_provider == "gemini"
-        assert s.odin_model == "gemini-2.0-flash"
+        assert s.odin_model == "gemini-2.5-flash"
         assert s.gemini_api_key == "abc123"
 
     def test_unused_provider_config_not_required(self, monkeypatch):
@@ -149,14 +149,14 @@ class TestFactory:
     def test_creates_gemini_provider(self):
         s = Settings(
             odin_model_provider="gemini",
-            odin_model="gemini-2.0-flash",
+            odin_model="gemini-2.5-flash",
             gemini_api_key="test-key",
             _env_file=None,
         )
         provider = create_llm_provider(s)
         assert isinstance(provider, LiteLLMProvider)
-        assert provider.model == "gemini-2.0-flash"
-        assert provider.litellm_model == "gemini/gemini-2.0-flash"
+        assert provider.model == "gemini-2.5-flash"
+        assert provider.litellm_model == "gemini/gemini-2.5-flash"
         assert provider.api_key == "test-key"
 
     def test_creates_groq_provider(self):
@@ -187,12 +187,12 @@ class TestFactory:
     def test_model_already_prefixed_is_not_double_prefixed(self):
         s = Settings(
             odin_model_provider="gemini",
-            odin_model="gemini/gemini-2.0-flash",
+            odin_model="gemini/gemini-2.5-flash",
             gemini_api_key="test-key",
             _env_file=None,
         )
         provider = create_llm_provider(s)
-        assert provider.litellm_model == "gemini/gemini-2.0-flash"
+        assert provider.litellm_model == "gemini/gemini-2.5-flash"
 
     def test_groq_without_api_key_raises(self):
         s = Settings(
