@@ -2,10 +2,24 @@
 
 Design
 ------
-The agent talks to a single facade, :class:`MemoryService`, with two operations:
+The agent talks to a single facade, :class:`MemoryService`, which exposes the
+full CRUD surface the issue asks for:
 
-- ``recall(query)`` — look up memories relevant to the incoming message;
-- ``remember(user, assistant)`` — persist what the exchange taught the agent.
+- ``remember`` / ``remember_text`` — create (persist an exchange or a fact);
+- ``recall`` / ``recall_records`` / ``list_memories`` — read (semantic search
+  and plain listing);
+- ``update`` — change a memory's text and/or its metadata;
+- ``forget`` — delete a memory by id.
+
+Every method is *best-effort*: failures are logged and swallowed (returning an
+empty/`False` result) so a broken store can never take down a chat turn.
+
+Each memory carries metadata: ``origin`` (e.g. the ``conversation_id`` it came
+from), ``source`` (``conversation`` / ``tool`` / ``briefing``), a ``created_at``
+timestamp, an optional ``confidence`` and — on search — the backend's
+``relevance`` score. Honesty over completeness: Mem0 exposes no confidence
+signal, so ``confidence`` is ``None`` unless the caller supplies one; it is
+never fabricated.
 
 The facade delegates to a :class:`MemoryBackend`. The default backend is Mem0
 (``Mem0Backend``) configured **local-first**: the extraction LLM and the
@@ -23,12 +37,13 @@ Two escape hatches exist for machines where the extraction LLM is a problem
 
 Why Mem0 and not sqlite-vec
 ---------------------------
-Mem0 gives fact extraction, dedup and update for free (it runs the LLM once per
-operation, which is exactly why it points at local Ollama). ``sqlite-vec`` would
-be lighter — it reuses ``odin.db`` with no extra service — but the extraction /
-dedup logic would have to be written by hand. The :class:`MemoryBackend` Protocol
-keeps that trade-off open: a sqlite-vec backend can be dropped in without
-touching the agent loop.
+Mem0 gives fact extraction, dedup, update and delete for free (it runs the LLM
+once per write, which is exactly why it points at local Ollama). ``sqlite-vec``
+would be lighter — it reuses ``odin.db`` with no extra service — but the
+extraction / dedup logic would have to be written by hand, and the issue's
+"tabela SQLite criada no startup" criterion is knowingly traded for that.
+The :class:`MemoryBackend` Protocol keeps the trade-off open: a sqlite-vec
+backend can be dropped in without touching the agent loop or the tool.
 
 Everything is opt-in and lazy
 -----------------------------
@@ -45,6 +60,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from app.config import Settings
@@ -57,30 +74,125 @@ MEMORY_CONTEXT_HEADER = (
     "may be outdated; use only if relevant):"
 )
 
+# How a memory was created, recorded in its metadata (the issue's
+# "origem: conversa / ferramenta / briefing").
+SOURCE_CONVERSATION = "conversation"
+SOURCE_TOOL = "tool"
+SOURCE_BRIEFING = "briefing"
+
+
+@dataclass
+class MemoryRecord:
+    """A single stored memory plus the metadata the issue asks for.
+
+    Attributes
+    ----------
+    memory:
+        The fact text.
+    origin:
+        Where it came from — the ``conversation_id`` for automatic captures.
+    source:
+        The kind of origin (``conversation`` / ``tool`` / ``briefing``).
+    created_at / updated_at:
+        ISO-8601 timestamps. Read from the backend's own fields when it exposes
+        them, otherwise from the metadata written at store time.
+    relevance:
+        The backend's similarity score for a search hit; ``None`` when listing.
+    confidence:
+        How sure the store is that the fact is correct. Mem0 exposes **no**
+        confidence signal, so this is ``None`` unless a caller stored one — it
+        is never fabricated.
+    metadata:
+        The raw metadata dict as returned by the backend.
+    """
+
+    memory: str
+    id: str | None = None
+    origin: str | None = None
+    source: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    relevance: float | None = None
+    confidence: float | None = None
+    metadata: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        """JSON-serialisable view (used by the memory tool)."""
+        return {
+            "id": self.id,
+            "memory": self.memory,
+            "origin": self.origin,
+            "source": self.source,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "relevance": self.relevance,
+            "confidence": self.confidence,
+        }
+
 
 @runtime_checkable
 class MemoryBackend(Protocol):
     """Storage contract behind :class:`MemoryService`.
 
-    Both methods are awaitable so the Mem0 backend can offload its blocking
-    client to a thread and tests can supply a trivial async fake.
+    Every method is awaitable so the Mem0 backend can offload its blocking
+    client to a thread and tests can supply a trivial async fake. Each returns
+    plain record dicts (or ``bool`` for mutations); mapping them to
+    :class:`MemoryRecord` happens once, in the facade.
     """
 
     async def search(
-        self, query: str, *, user_id: str = "odin", limit: int = 5
+        self,
+        query: str,
+        *,
+        user_id: str = "odin",
+        limit: int = 5,
+        origin: str | None = None,
     ) -> list[dict]:  # pragma: no cover - protocol
         """Return memory records relevant to ``query`` (``[{"memory": str}, ...]``)."""
         ...
 
     async def add(
-        self, messages: list[dict], *, user_id: str = "odin"
-    ) -> None:  # pragma: no cover - protocol
-        """Persist an interaction, extracting durable facts from it."""
+        self,
+        messages: list[dict],
+        *,
+        user_id: str = "odin",
+        metadata: dict | None = None,
+    ) -> list[dict]:  # pragma: no cover - protocol
+        """Persist an interaction, extracting durable facts from it.
+
+        Returns the affected records (may be empty) so the caller can report ids.
+        """
+        ...
+
+    async def list_memories(
+        self,
+        *,
+        user_id: str = "odin",
+        limit: int = 100,
+        origin: str | None = None,
+    ) -> list[dict]:  # pragma: no cover - protocol
+        """Return every stored memory for the user (newest/relevance order)."""
+        ...
+
+    async def update(
+        self,
+        memory_id: str,
+        *,
+        text: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:  # pragma: no cover - protocol
+        """Update a memory's text and/or metadata. ``True`` on success."""
+        ...
+
+    async def delete(
+        self, memory_id: str
+    ) -> bool:  # pragma: no cover - protocol
+        """Forget (delete) a memory by id. ``True`` on success."""
         ...
 
 
 class MemoryService:
-    """Facade the agent loop uses. Never raises: recall/remember are best-effort."""
+    """Facade the agent and the memory tool use. Never raises: best-effort CRUD."""
 
     def __init__(
         self,
@@ -88,49 +200,205 @@ class MemoryService:
         *,
         user_id: str = "odin",
         recall_limit: int = 5,
+        list_limit: int = 100,
+        store_metadata: bool = True,
     ) -> None:
         self._backend = backend
         self.user_id = user_id
         self.recall_limit = recall_limit
+        # Cap for explicit listings (the tool's `list` action). Bounds what the
+        # agent can pull into its context at once.
+        self.list_limit = list_limit
+        # When false, memories are stored without the origin/source/timestamp
+        # metadata (escape hatch for stores that reject custom metadata).
+        self.store_metadata = store_metadata
 
-    async def recall(self, query: str, *, conversation_id: str | None = None) -> list[str]:
+    # -- read ---------------------------------------------------------------
+    async def recall(
+        self,
+        query: str,
+        *,
+        conversation_id: str | None = None,
+        origin: str | None = None,
+        limit: int | None = None,
+    ) -> list[str]:
         """Return the memory texts relevant to ``query`` (possibly empty).
+
+        ``origin`` optionally narrows the search to memories from one source
+        (e.g. a ``conversation_id``). ``conversation_id`` is accepted for
+        signature compatibility with the agent loop and is **not** used as a
+        filter — long-term memory is deliberately cross-conversation.
 
         A failure is logged and swallowed: a broken memory store must never
         take down a chat turn.
         """
-        query = (query or "").strip()
-        if not query:
-            return []
-        try:
-            records = await self._backend.search(
-                query, user_id=self.user_id, limit=self.recall_limit
-            )
-        except Exception as exc:  # noqa: BLE001 - defensive by design
-            logger.warning(f"Memory recall failed (ignored): {exc}")
-            return []
+        records = await self._search(query, limit=limit, origin=origin)
         return _extract_memory_texts(records)
 
+    async def recall_records(
+        self,
+        query: str,
+        *,
+        origin: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryRecord]:
+        """Like :meth:`recall`, but return annotated :class:`MemoryRecord`s.
+
+        Search hits carry their ``relevance`` score and their stored metadata;
+        a failure yields an empty list.
+        """
+        records = await self._search(query, limit=limit, origin=origin)
+        return _to_records(records, relevance_key="score")
+
+    async def list_memories(
+        self, *, origin: str | None = None, limit: int | None = None
+    ) -> list[MemoryRecord]:
+        """Return stored memories (no query), newest/backend order, annotated."""
+        try:
+            records = await self._backend.list_memories(
+                user_id=self.user_id,
+                limit=limit or self.list_limit,
+                origin=origin,
+            )
+        except Exception as exc:  # noqa: BLE001 - defensive by design
+            logger.warning(f"Memory listing failed (ignored): {exc}")
+            return []
+        return _to_records(records)
+
+    # -- write --------------------------------------------------------------
     async def remember(
         self,
         user_message: str,
         assistant_message: str,
         *,
         conversation_id: str | None = None,
-    ) -> None:
-        """Persist a completed interaction for future recall (best-effort)."""
+        source: str = SOURCE_CONVERSATION,
+        confidence: float | None = None,
+    ) -> list[MemoryRecord]:
+        """Persist a completed interaction for future recall (best-effort).
+
+        ``conversation_id`` is stored as the memory's ``origin``. Returns the
+        records the backend reports as written (may be empty).
+        """
         user_message = (user_message or "").strip()
         assistant_message = (assistant_message or "").strip()
         if not user_message or not assistant_message:
-            return
+            return []
         messages = [
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": assistant_message},
         ]
+        return await self._write(
+            messages, origin=conversation_id, source=source, confidence=confidence
+        )
+
+    async def remember_text(
+        self,
+        text: str,
+        *,
+        origin: str | None = None,
+        source: str = SOURCE_TOOL,
+        confidence: float | None = None,
+    ) -> list[MemoryRecord]:
+        """Persist a single explicit fact (the tool's ``save`` action)."""
+        text = (text or "").strip()
+        if not text:
+            return []
+        return await self._write(
+            [{"role": "user", "content": text}],
+            origin=origin,
+            source=source,
+            confidence=confidence,
+        )
+
+    async def update(
+        self,
+        memory_id: str,
+        *,
+        text: str | None = None,
+        origin: str | None = None,
+        source: str | None = None,
+        confidence: float | None = None,
+    ) -> bool:
+        """Update a memory's text and/or metadata. ``False`` on any failure."""
+        memory_id = (memory_id or "").strip()
+        if not memory_id:
+            return False
+        new_text = text.strip() if isinstance(text, str) else None
+        metadata: dict | None = None
+        has_metadata_change = (
+            origin is not None or source is not None or confidence is not None
+        )
+        if self.store_metadata and has_metadata_change:
+            metadata = {"updated_at": _now_iso()}
+            if origin is not None:
+                metadata["origin"] = str(origin)
+            if source is not None:
+                metadata["source"] = str(source)
+            if confidence is not None:
+                metadata["confidence"] = _as_float(confidence)
+        if not new_text and not metadata:
+            return False
         try:
-            await self._backend.add(messages, user_id=self.user_id)
+            return bool(
+                await self._backend.update(
+                    memory_id, text=new_text, metadata=metadata
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - defensive by design
+            logger.warning(f"Memory update failed (ignored): {exc}")
+            return False
+
+    async def forget(self, memory_id: str) -> bool:
+        """Delete a memory by id. ``False`` on any failure."""
+        memory_id = (memory_id or "").strip()
+        if not memory_id:
+            return False
+        try:
+            return bool(await self._backend.delete(memory_id))
+        except Exception as exc:  # noqa: BLE001 - defensive by design
+            logger.warning(f"Memory forget failed (ignored): {exc}")
+            return False
+
+    # -- internals ----------------------------------------------------------
+    async def _search(
+        self, query: str, *, limit: int | None, origin: str | None
+    ) -> list[dict]:
+        query = (query or "").strip()
+        if not query:
+            return []
+        try:
+            return await self._backend.search(
+                query,
+                user_id=self.user_id,
+                limit=limit or self.recall_limit,
+                origin=origin,
+            )
+        except Exception as exc:  # noqa: BLE001 - defensive by design
+            logger.warning(f"Memory recall failed (ignored): {exc}")
+            return []
+
+    async def _write(
+        self,
+        messages: list[dict],
+        *,
+        origin: str | None,
+        source: str,
+        confidence: float | None,
+    ) -> list[MemoryRecord]:
+        metadata = (
+            _build_memory_metadata(origin=origin, source=source, confidence=confidence)
+            if self.store_metadata
+            else None
+        )
+        try:
+            records = await self._backend.add(
+                messages, user_id=self.user_id, metadata=metadata
+            )
         except Exception as exc:  # noqa: BLE001 - defensive by design
             logger.warning(f"Memory write-back failed (ignored): {exc}")
+            return []
+        return _to_records(records)
 
 
 # ---------------------------------------------------------------------------
@@ -164,30 +432,78 @@ class Mem0Backend:
             _disable_thinking(self._memory, num_ctx=settings.odin_memory_num_ctx)
 
     async def search(
-        self, query: str, *, user_id: str = "odin", limit: int = 5
+        self,
+        query: str,
+        *,
+        user_id: str = "odin",
+        limit: int = 5,
+        origin: str | None = None,
     ) -> list[dict]:
-        kwargs = self._search_kwargs(user_id, limit)
+        kwargs = self._search_kwargs(user_id, limit, origin)
         result = await asyncio.to_thread(self._memory.search, query, **kwargs)
         return _as_records(result)
 
-    async def add(self, messages: list[dict], *, user_id: str = "odin") -> None:
-        kwargs = self._add_kwargs(user_id)
-        await asyncio.to_thread(self._memory.add, messages, **kwargs)
+    async def add(
+        self,
+        messages: list[dict],
+        *,
+        user_id: str = "odin",
+        metadata: dict | None = None,
+    ) -> list[dict]:
+        kwargs = self._add_kwargs(user_id, metadata)
+        result = await asyncio.to_thread(self._memory.add, messages, **kwargs)
+        return _as_records(result)
 
-    def _search_kwargs(self, user_id: str, limit: int) -> dict:
+    async def list_memories(
+        self,
+        *,
+        user_id: str = "odin",
+        limit: int = 100,
+        origin: str | None = None,
+    ) -> list[dict]:
+        kwargs = self._list_kwargs(user_id, limit, origin)
+        result = await asyncio.to_thread(self._memory.get_all, **kwargs)
+        return _as_records(result)
+
+    async def update(
+        self,
+        memory_id: str,
+        *,
+        text: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        kwargs = self._update_kwargs(text, metadata)
+        if not kwargs:
+            return False
+        await asyncio.to_thread(self._memory.update, memory_id, **kwargs)
+        return True
+
+    async def delete(self, memory_id: str) -> bool:
+        await asyncio.to_thread(self._memory.delete, memory_id)
+        return True
+
+    def _search_kwargs(
+        self, user_id: str, limit: int, origin: str | None = None
+    ) -> dict:
         """Build search kwargs for the installed Mem0's API.
 
         Mem0 2.x moved the entity to ``filters={"user_id": ...}`` and renamed the
         result cap to ``top_k``; older versions take ``user_id``/``limit`` as
         top-level kwargs. Introspect once and adapt (the extra kwargs land in
         ``**kwargs`` on 2.x and would otherwise be silently ignored).
+
+        ``origin`` is an extra metadata filter and is only supported on the
+        literal-``filters`` API (2.x); legacy versions ignore it.
         """
         params = inspect.signature(self._memory.search).parameters
         if "filters" in params:
-            return {"filters": {"user_id": user_id}, "top_k": limit}
+            filters: dict = {"user_id": user_id}
+            if origin:
+                filters["origin"] = origin
+            return {"filters": filters, "top_k": limit}
         return {"user_id": user_id, "limit": limit}
 
-    def _add_kwargs(self, user_id: str) -> dict:
+    def _add_kwargs(self, user_id: str, metadata: dict | None = None) -> dict:
         params = inspect.signature(self._memory.add).parameters
         if "user_id" in params:
             kwargs: dict = {"user_id": user_id}
@@ -195,6 +511,41 @@ class Mem0Backend:
             kwargs = {"filters": {"user_id": user_id}}
         if "infer" in params:
             kwargs["infer"] = self._infer
+        if metadata and "metadata" in params:
+            kwargs["metadata"] = metadata
+        return kwargs
+
+    def _list_kwargs(
+        self, user_id: str, limit: int, origin: str | None = None
+    ) -> dict:
+        """Build ``get_all`` kwargs, adapting to the installed Mem0 API.
+
+        Mirrors :meth:`_search_kwargs`: 2.x takes ``filters``/``top_k``, older
+        versions take ``user_id``/``limit``.
+        """
+        params = inspect.signature(self._memory.get_all).parameters
+        if "filters" in params:
+            filters: dict = {"user_id": user_id}
+            if origin:
+                filters["origin"] = origin
+            return {"filters": filters, "top_k": limit}
+        return {"user_id": user_id, "limit": limit}
+
+    def _update_kwargs(self, text: str | None, metadata: dict | None) -> dict:
+        """Build ``update`` kwargs, adapting to the installed Mem0 API.
+
+        Mem0 2.x renamed ``data`` to ``text``; the legacy name is still accepted
+        here so older installs keep working.
+        """
+        params = inspect.signature(self._memory.update).parameters
+        kwargs: dict = {}
+        if text is not None:
+            if "text" in params:
+                kwargs["text"] = text
+            elif "data" in params:
+                kwargs["data"] = text
+        if metadata and "metadata" in params:
+            kwargs["metadata"] = metadata
         return kwargs
 
 
@@ -336,6 +687,8 @@ def create_memory_service(settings: Settings) -> MemoryService | None:
         backend,
         user_id=settings.odin_memory_user_id,
         recall_limit=settings.odin_memory_recall_limit,
+        list_limit=settings.odin_memory_list_limit,
+        store_metadata=settings.odin_memory_store_metadata,
     )
 
 
@@ -350,8 +703,46 @@ def format_memory_context(memories: list[str]) -> str:
     return f"{MEMORY_CONTEXT_HEADER}\n{bullets}"
 
 
+def _now_iso() -> str:
+    """Current UTC timestamp as an ISO-8601 string (timezone-aware)."""
+    return datetime.now(UTC).isoformat()
+
+
+def _build_memory_metadata(
+    *,
+    origin: str | None,
+    source: str,
+    confidence: float | None = None,
+) -> dict:
+    """Assemble the metadata stored with a memory.
+
+    Only honest values are written: ``origin``/``source`` are known by
+    construction, ``created_at`` is the real write time, and ``confidence`` is
+    omitted unless a caller supplied one (Mem0 has no confidence signal of its
+    own, so inventing a number would be misleading).
+    """
+    metadata: dict = {
+        "origin": str(origin) if origin else "unknown",
+        "source": str(source) if source else SOURCE_CONVERSATION,
+        "created_at": _now_iso(),
+    }
+    if confidence is not None:
+        metadata["confidence"] = _as_float(confidence)
+    return metadata
+
+
+def _as_float(value: Any) -> float | None:
+    """Coerce a metadata value to ``float``, or ``None`` when it is not numeric."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _as_records(result: Any) -> list[dict]:
-    """Normalise Mem0's search return value into a list of record dicts.
+    """Normalise Mem0's return value into a list of record dicts.
 
     Mem0 has returned both ``{"results": [...]}`` and a bare list across
     versions; accept either.
@@ -372,3 +763,54 @@ def _extract_memory_texts(records: list[dict]) -> list[str]:
         if text:
             texts.append(text)
     return texts
+
+
+def _to_records(
+    raw: list[dict], *, relevance_key: str | None = None
+) -> list[MemoryRecord]:
+    """Map backend record dicts to :class:`MemoryRecord`s (dropping textless ones).
+
+    ``relevance_key`` names the field carrying the similarity score (``score``
+    for a Mem0 search); a plain listing passes ``None`` and leaves relevance
+    unset. Metadata is the single source for origin/source/confidence, with the
+    backend's own top-level fields winning for timestamps when present.
+    """
+    records: list[MemoryRecord] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("memory") or item.get("text") or ""
+        text = str(text).strip()
+        if not text:
+            continue
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        records.append(
+            MemoryRecord(
+                memory=text,
+                id=_as_str(item.get("id")),
+                origin=_as_str(item.get("origin") or metadata.get("origin")),
+                source=_as_str(item.get("source") or metadata.get("source")),
+                created_at=_as_str(
+                    item.get("created_at") or metadata.get("created_at")
+                ),
+                updated_at=_as_str(
+                    item.get("updated_at") or metadata.get("updated_at")
+                ),
+                relevance=_as_float(item.get(relevance_key)) if relevance_key else None,
+                confidence=_as_float(
+                    item.get("confidence", metadata.get("confidence"))
+                ),
+                metadata=metadata,
+            )
+        )
+    return records
+
+
+def _as_str(value: Any) -> str | None:
+    """Coerce a value to ``str``, mapping ``None``/empty to ``None``."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
