@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     # Namespace the memories (per-user) and how many to recall per turn.
     odin_memory_user_id: str = "odin"
     odin_memory_recall_limit: int = 5
+    # Cap for an explicit listing (the memory tool's `list` action), so the
+    # agent cannot pull the whole store into its context in one call.
+    odin_memory_list_limit: int = 100
+    # Persist origin/source/created_at (and confidence when known) as memory
+    # metadata. Set false only for a backend that rejects custom metadata.
+    odin_memory_store_metadata: bool = True
 
     # MCP servers. A JSON array describing external Model Context Protocol
     # servers whose tools should be exposed to the agent (see .env.example).

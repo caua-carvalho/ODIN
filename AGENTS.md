@@ -184,6 +184,7 @@ The agent maintains a registry of all available tools, registered during startup
 - **Filesystem tools**: `read_file`, `list_directory`, `search_files`, `write_file`, `delete_file`, `move_file`, `create_directory`
 - **Shell tool**: `execute_command`
 - **Project tools**: `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `list_tasks`, `create_task`, `update_task`, `move_task`, `delete_task`, `list_project_files`, `read_project_file`, `write_project_file`, `create_project_directory`, `delete_project_file` (see the Projects section)
+- **Memory tool**: `memory` (save/recall/list/update/forget long-term memories; see the Long-term memory section)
 
 Tools are converted to provider-agnostic LLM tool definitions via `ToolRegistry.to_llm_tools()` (in `backend/app/tools/registry.py`). The registry is a global singleton — if you add a new tool, you must register it in the lifespan section of `main.py`.
 
@@ -226,10 +227,36 @@ as before, and `MCPManager.start()` is a no-op.
 > `mcp__<server>__<tool>` so they cannot collide with native tools. Guarded by
 > `backend/tests/test_mcp.py`.
 
+## Long-term memory
+
+Optional Mem0-backed long-term memory (Phase 3, issue #27). **Off by default**
+(`ODIN_MEMORY_ENABLED=false`): with it off — or when the optional `mem0` package
+is missing — `create_memory_service` returns `None`, Mem0 is never imported and
+the agent loop behaves exactly as before. The `mem0` import is lazy, inside
+`Mem0Backend`.
+
+- `backend/app/agent/memory/service.py` holds the whole feature: the
+  `MemoryBackend` Protocol, the `MemoryService` facade and the `Mem0Backend`.
+- Full CRUD on the facade: `remember`/`remember_text` (create), `recall` /
+  `recall_records` / `list_memories` (read), `update`, `forget` (delete). Every
+  method is best-effort — failures are logged and swallowed, never raised.
+- Each memory stores metadata: `origin` (the `conversation_id`), `source`
+  (`conversation`/`tool`/`briefing`), `created_at`, and an optional
+  `confidence`. Search hits also carry `relevance` (Mem0's similarity score).
+  Mem0 exposes no confidence signal, so `confidence` is `None` unless supplied —
+  never fabricated (`ODIN_MEMORY_STORE_METADATA=false` disables the metadata).
+- Wiring: `agent.py` recalls before a turn and writes the exchange back after
+  `done`; the explicit `memory` tool (`backend/app/tools/memory/`) lets the agent
+  save/recall/list/update/forget on request. The tool touches only Odin's own
+  store (no filesystem/shell), so it needs **no** approval.
+- Config: `ODIN_MEMORY_RECALL_LIMIT` (per-turn recall), `ODIN_MEMORY_LIST_LIMIT`
+  (cap for the tool's `list`). The SQLite `odin.db` schema is **not** used —
+  Mem0 owns an embedded vector store on disk (`ODIN_MEMORY_VECTOR_STORE`).
+
 ## Testing
 
 - Tests live in `backend/tests/`. Run with: `cd backend && .venv/bin/pytest tests/ -v`
-- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contract, tool registry bridge, tool-call history, factory, env config), `test_litellm_provider.py` (the LiteLLM adapter: message/tool conversion, streamed tool-call accumulation, provider-extra round-trip, transient-failure retries, fake backend), `test_agent_chat.py` (agent loop: retry→status forwarding, partial save on cancellation), `test_chat_ws.py` (chat WebSocket: stop cancels the in-flight turn, busy guard, ping/pong), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards). The full suite runs in a couple of seconds without any network access.
+- Test modules: `test_security.py` (PathGuard + policy + command policy), `test_providers.py` (provider contract, tool registry bridge, tool-call history, factory, env config), `test_litellm_provider.py` (the LiteLLM adapter: message/tool conversion, streamed tool-call accumulation, provider-extra round-trip, transient-failure retries, fake backend), `test_agent_chat.py` (agent loop: retry→status forwarding, partial save on cancellation), `test_chat_ws.py` (chat WebSocket: stop cancels the in-flight turn, busy guard, ping/pong), `test_providers_catalog.py` (catalog, availability, model discovery, active selection), `test_auth_session.py` (session signer + login route + middleware), `test_cli_config.py`, `test_briefing.py`, `test_projects.py` (project/task CRUD + workspace path-traversal guards), `test_memory.py` (memory CRUD/metadata + the `memory` tool, fully offline with fakes). The full suite runs in a couple of seconds without any network access.
 - Smoke tests (manual verification the app boots and talks to the LLM):
   - `python smoke_bootstrap.py` — FastAPI bootstrap with Ollama
   - `python smoke_agent.py` — Full OdinAgent loop with persistence

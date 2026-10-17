@@ -287,7 +287,8 @@ class OdinAgent:
 
         # Persist the exchange to long-term memory AFTER `done`: Mem0 runs an
         # extraction LLM call, so doing it here keeps it off the completion
-        # signal's critical path. Best-effort — `remember` never raises.
+        # signal's critical path. Best-effort — `remember` never raises. The
+        # `conversation_id` is stored as each memory's `origin` metadata.
         if self.memory is not None and full_response_text:
             await self.memory.remember(
                 user_message=message,

@@ -18,6 +18,7 @@ from app.tools.registry import ToolRegistry
 from app.tools.filesystem.tools import create_filesystem_tools
 from app.tools.shell.tools import ExecuteCommandTool
 from app.tools.projects.tools import create_project_tools
+from app.tools.memory.tools import create_memory_tools
 from app.agent.mcp.manager import mcp_manager
 from app.agent.mcp.tool import create_mcp_tools
 from app.security.path_guard import PathGuard
@@ -116,6 +117,13 @@ async def lifespan(app: FastAPI):
     for project_tool in create_project_tools(security_policy):
         tool_registry.register(project_tool)
 
+    # Long-term memory (Phase 3, optional). ``None`` when disabled or when Mem0
+    # is not installed. The single service instance is shared by the explicit
+    # `memory` tool and the agent loop's automatic recall/write-back.
+    memory_service = create_memory_service(settings)
+    for memory_tool in create_memory_tools(memory_service):
+        tool_registry.register(memory_tool)
+
     # Register tools from configured MCP servers. Optional and non-fatal: with
     # no servers configured (or the `mcp` SDK missing) this is a no-op, and a
     # server that fails to connect is reported in /api/mcp instead of stopping
@@ -151,7 +159,7 @@ async def lifespan(app: FastAPI):
         websocket_manager=ws_manager,
         # Optional long-term memory. ``None`` when disabled or when Mem0 is not
         # installed — the agent loop is then identical to before Phase 3.
-        memory=create_memory_service(settings),
+        memory=memory_service,
     )
     logger.info("Odin agent ready")
 

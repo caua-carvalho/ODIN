@@ -2,7 +2,10 @@
 
 Public surface:
 
-- ``MemoryService`` — facade the agent loop talks to (``recall`` / ``remember``);
+- ``MemoryService`` — facade with full CRUD (``remember`` / ``recall`` /
+  ``list_memories`` / ``update`` / ``forget``);
+- ``MemoryRecord`` — a stored memory with its metadata (origin, source,
+  timestamps, relevance, confidence);
 - ``MemoryBackend`` — the store contract, so tests use a fake and a different
   store (e.g. sqlite-vec) can be dropped in later;
 - ``create_memory_service`` — builds a Mem0-backed service from ``Settings``,
@@ -15,6 +18,7 @@ import from Phase 1).
 
 from app.agent.memory.service import (
     MemoryBackend,
+    MemoryRecord,
     MemoryService,
     create_memory_service,
     format_memory_context,
@@ -22,6 +26,7 @@ from app.agent.memory.service import (
 
 __all__ = [
     "MemoryBackend",
+    "MemoryRecord",
     "MemoryService",
     "create_memory_service",
     "format_memory_context",
